@@ -1120,7 +1120,9 @@
   /* ---------- גיליון הוספה ---------- */
 
   Screens.addSheet = function (entityId) {
-    window.App.pendingEntityId = entityId || null;
+    /* ה-FAB גלובלי ואינו יודע מאיפה נלחץ; מסך ישות הוא הקשר, ולכן
+       השיוך נגזר מהמסלול כשהקורא לא מסר אותו במפורש. */
+    window.App.pendingEntityId = entityId || window.App.entityContext();
 
     function route(kind) {
       sheet.close();

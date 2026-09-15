@@ -1657,6 +1657,91 @@ t('גרירה אופקית בלוח מחליפה מקום',
 t('והסדר החדש נשמר', board.saved.join(',') === board.mid.join(','),
   board.saved.join(',') + ' vs ' + board.mid.join(','));
 
+/* ---------- השיוך של מסמך חדש ----------
+   הדיווח: "אני מעלה מסמך מתוך הישות, והוא נשמר על הישות הראשונה ברשימה".
+   מסך ישות שיש בו מסמכים אינו מציג כפתור הוספה משלו — המשתמש מוסיף
+   דרך ה-FAB הגלובלי, וזה לא ידע מאיזה מסך נלחץ. אותו חור קיים בגרירה
+   ובהדבקה, שאינן עוברות דרך גיליון ההוספה בכלל. */
+console.log('\n— השיוך נגזר מהמסך שממנו הוסיפו —');
+const ctx3 = await browser.newContext({ viewport: { width: 420, height: 920 }, locale: 'he-IL' });
+const p3 = await ctx3.newPage();
+const errs3 = []; p3.on('pageerror', e => errs3.push(e.message));
+p3.on('console', m => { if (m.type() === 'error') errs3.push(m.text()); });
+await p3.goto(BASE);
+await p3.waitForSelector('.scr-title');
+await p3.evaluate(async () => {
+  await window.DB.saveEntity({ id: 'a-person', type: 'person', name: 'ראשון',
+    color: '#4B6B7A', avatar: 'ר', sortOrder: 1 });
+  await window.DB.saveEntity({ id: 'b-car', type: 'vehicle', name: 'מאזדה',
+    color: '#8B6F47', avatar: 'מ', sortOrder: 2 });
+  await window.App.render();
+});
+
+const firstEntity = await p3.evaluate(() => window.Screens.state.entities[0].id);
+t('הישות הראשונה ברשימה אינה הישות שנבדקת', firstEntity === 'a-person', firstEntity);
+
+async function fabForm(hash) {
+  await p3.goto(BASE + hash);
+  await p3.waitForSelector('.fab');
+  await p3.click('.fab');
+  await p3.waitForSelector('.routes');
+  await p3.click('.routes .route:has-text("הזנה ידנית")');
+  await p3.waitForSelector('#d-entity');
+  return p3.inputValue('#d-entity');
+}
+
+t('ה-FAB במסך ישות פותח טופס משויך לאותה ישות',
+  (await fabForm('#/entity/b-car')) === 'b-car');
+
+await p3.selectOption('#d-type', { label: 'טסט' });
+await p3.waitForSelector('#f-plate');
+await p3.fill('#f-plate', '8452103');
+await p3.fill('#d-expiry', '2030-03-01');
+await p3.click('#doc-save');
+await p3.waitForSelector('.doc-head');
+t('והמסמך נשמר על הישות הזאת ולא על הראשונה',
+  (await p3.evaluate(() => window.Screens.state.docs.slice(-1)[0].entityId)) === 'b-car',
+  await p3.evaluate(() => window.Screens.state.docs.slice(-1)[0].entityId));
+
+/* המסך שבו הבאג התגלה: ישות שכבר יש בה מסמך, ולכן אין בה מצב ריק
+   ואין בה כפתור הוספה משלה. */
+t('גם כשלישות כבר יש מסמכים, ואין בה מצב ריק',
+  (await fabForm('#/entity/b-car')) === 'b-car');
+
+t('ובמסך הבית אין הקשר, ולכן נשארת ברירת המחדל',
+  (await fabForm('#/entities')) === 'a-person');
+
+/* גרירה והדבקה אינן עוברות דרך גיליון ההוספה, ולכן הן היו מאבדות את
+   הישות גם אילו ה-FAB היה מתוקן לבדו. */
+await p3.goto(BASE + '#/entity/b-car');
+await p3.waitForSelector('.scr');
+await p3.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.items.add(new File([new Uint8Array([1, 2, 3])], 'd.pdf', { type: 'application/pdf' }));
+  document.body.dispatchEvent(new DragEvent('drop', {
+    dataTransfer: dt, bubbles: true, cancelable: true
+  }));
+});
+await p3.waitForSelector('#d-entity');
+t('קובץ שנגרר למסך ישות מגיע לטופס משויך אליה',
+  (await p3.inputValue('#d-entity')) === 'b-car');
+
+/* טופס פתוח הוא היוצא מן הכלל: החלפת הקובץ בתוכו אינה מאפסת שיוך
+   שכבר נבחר בו, מפני שהמסלול `#/doc/new` אינו מסך ישות. */
+await p3.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.items.add(new File([new Uint8Array([4, 5, 6])], 'e.pdf', { type: 'application/pdf' }));
+  document.body.dispatchEvent(new DragEvent('drop', {
+    dataTransfer: dt, bubbles: true, cancelable: true
+  }));
+});
+await p3.waitForTimeout(400);
+t('והחלפת הקובץ בטופס פתוח אינה מאפסת את השיוך שנבחר בו',
+  (await p3.inputValue('#d-entity')) === 'b-car');
+
+t('אפס שגיאות קונסול במסלול הזה', errs3.length === 0, errs3.join(' | '));
+await ctx3.close();
+
 await browser.close();
 console.log(`\nסה״כ: ${pass} עברו, ${fail} נכשלו`);
 process.exit(fail ? 1 : 0);

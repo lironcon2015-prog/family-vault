@@ -33,6 +33,19 @@
     return h.split('/').filter(Boolean);
   }
 
+  /* ---------- הקשר השיוך ----------
+     מסמך חדש נתלה על הישות שממסכה הוא נוסף, ולא על הראשונה ברשימה.
+     ההקשר נגזר מהמסלול, מפני שכל מסלולי ההוספה — ה-FAB, גרירה, הדבקה —
+     נכנסים מנקודות שונות ואין אחת מהן שיודעת לבדה מי הישות. מסך שאינו
+     מסך ישות אינו הקשר, ולכן הוא מנקה שיוך ישן במקום לגרור אותו הלאה;
+     טופס פתוח הוא היוצא מן הכלל — השיוך שכבר נבחר בו שורד החלפת קובץ. */
+  App.entityContext = function () {
+    var parts = parse();
+    if (parts[0] === 'entity' && parts[1]) return parts[1];
+    if (parts[0] === 'doc' && parts[1] === 'new') return App.pendingEntityId;
+    return null;
+  };
+
   /* ---------- היסטוריה ----------
      לא כל מסך הוא יעד. מסך טופס הוא צעד בדרך: ברגע שהשמירה הסתיימה
      הוא סיים את תפקידו, ולחיצה על "חזור" צריכה להוביל למי ששלח אליו —
@@ -195,6 +208,7 @@
 
       App.staged = r.files;
       App.proposal = null;
+      App.pendingEntityId = App.entityContext();
       var converted = r.files.filter(function (f) { return f.converted; })[0];
       if (converted) UI.toast('הומר · ' + Files.label(converted));
 
@@ -350,6 +364,7 @@
     }
     App.staged = [];
     App.proposal = null;
+    App.pendingEntityId = App.entityContext();
     runGemini({ text: text.trim() }).then(openForm);
     return true;
   };
