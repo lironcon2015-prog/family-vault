@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>מה הלוח מוסר — אבחון</title>
+<!-- דף אבחון. אינו חלק מהאפליקציה, אינו ב-precache, ואינו טוען שום מודול
+     שלה. תפקידו היחיד: להדפיס מה iOS באמת מוסר לדף כשעל הלוח יושב PDF,
+     במקום להסיק את זה מהתיעוד. יורד מהריפו כשהתשובה בידינו. -->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 16px;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #f6f6f4; color: #1a1a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #141414; color: #e8e8e8; }
+    .card { background: #1f1f1f; border-color: #333; }
+    .drop { border-color: #555; }
+    pre { background: #0d0d0d; color: #d8d8d8; }
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 18px; opacity: .7; font-size: 14px; }
+  .card {
+    background: #fff; border: 1px solid #e0e0dc; border-radius: 12px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+  .card p { margin: 0 0 10px; font-size: 14px; opacity: .8; }
+  .drop {
+    border: 2px dashed #b9b9b3; border-radius: 10px; padding: 22px 12px;
+    text-align: center; opacity: .75; min-height: 24px;
+  }
+  textarea { width: 100%; box-sizing: border-box; border-radius: 10px;
+             border: 1px solid #ccc; padding: 10px; font: inherit; }
+  button {
+    display: block; width: 100%; box-sizing: border-box;
+    padding: 12px; border-radius: 10px; border: 0;
+    background: #2f4858; color: #fff; font: inherit; font-weight: 600;
+    margin-top: 8px;
+  }
+  button.ghost { background: transparent; color: inherit; border: 1px solid #b9b9b3; }
+  pre {
+    background: #101010; color: #e4e4e4; border-radius: 10px; padding: 12px;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-word; direction: ltr; text-align: left;
+    max-height: 60vh; overflow: auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>מה הלוח מוסר</h1>
+<p class="sub">עשה "שתף → העתק" על PDF, ואז נסה כל אחד משלושת המסלולים. כל מה
+שהדפדפן מוסר יודפס למטה.</p>
+
+<div class="card">
+  <h2>1 · הדבקה לתוך אזור עריכה</h2>
+  <p>לחיצה ארוכה כאן, ואז הדבק.</p>
+  <div class="drop" contenteditable="true" id="ce">הדבק כאן</div>
+</div>
+
+<div class="card">
+  <h2>2 · הדבקה לתוך textarea</h2>
+  <p>ספארי מתנהג אחרת בשדה טקסט רגיל מאשר באזור עריכה.</p>
+  <textarea id="ta" rows="2" placeholder="הדבק כאן"></textarea>
+</div>
+
+<div class="card">
+  <h2>3 · קריאת הלוח בקוד</h2>
+  <p>navigator.clipboard.read, בתוך מחווה.</p>
+  <button type="button" id="readBtn">קרא את הלוח</button>
+</div>
+
+<div class="card">
+  <h2>4 · ביקורת — בחירת קובץ</h2>
+  <p>כדי לראות איך נראה PDF שכן הגיע, לשם השוואה.</p>
+  <input type="file" id="fi" accept="image/*,application/pdf">
+</div>
+
+<pre id="log">ממתין.</pre>
+<button type="button" id="copyBtn" class="ghost">העתקת הפלט</button>
+<button type="button" id="clearBtn" class="ghost">ניקוי</button>
+
+<script>
+(function () {
+  'use strict';
+
+  var logEl = document.getElementById('log');
+  var lines = [];
+
+  function out(s) {
+    lines.push(s);
+    logEl.textContent = lines.join('\n');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function rule(title) {
+    out('');
+    out('======== ' + title + ' · ' + new Date().toLocaleTimeString('he-IL') + ' ========');
+  }
+
+  out('UA: ' + navigator.userAgent);
+  out('clipboard.read: ' + (navigator.clipboard && navigator.clipboard.read ? 'קיים' : 'לא קיים'));
+  out('ממתין לפעולה.');
+
+  /* ארבעת הבייטים הראשונים הם מה שמכריע אם זה באמת PDF ולא שם קובץ
+     שהתחפש לאחד. %PDF- בתחילת הקובץ. */
+  function sniff(blob, label) {
+    return blob.slice(0, 8).arrayBuffer().then(function (buf) {
+      var b = new Uint8Array(buf), hex = [], txt = '';
+      for (var i = 0; i < b.length; i++) {
+        hex.push(('0' + b[i].toString(16)).slice(-2));
+        txt += (b[i] >= 32 && b[i] < 127) ? String.fromCharCode(b[i]) : '.';
+      }
+      out('    ' + label + ' bytes: ' + hex.join(' ') + '  "' + txt + '"' +
+          (txt.indexOf('%PDF-') === 0 ? '   <-- PDF אמיתי' : ''));
+    }).catch(function (e) {
+      out('    ' + label + ' קריאת בייטים נכשלה: ' + e.name + ' ' + e.message);
+    });
+  }
+
+  function dumpDataTransfer(dt) {
+    if (!dt) { out('  clipboardData: null'); return; }
+
+    var types = dt.types ? Array.prototype.slice.call(dt.types) : [];
+    out('  types (' + types.length + '): ' + (types.join(', ') || '—'));
+
+    /* הקריאה הסינכרונית חייבת לקרות עכשיו: אחרי שהאירוע נגמר,
+       clipboardData מתרוקן ואין ממה לקרוא. */
+    var files = dt.files ? Array.prototype.slice.call(dt.files) : [];
+    var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var grabbed = items.map(function (it) {
+      return { kind: it.kind, type: it.type, file: it.kind === 'file' ? it.getAsFile() : null };
+    });
+    var texts = {};
+    types.forEach(function (t) {
+      if (t.indexOf('text/') === 0) {
+        try { texts[t] = dt.getData(t); } catch (e) { texts[t] = '<' + e.name + '>'; }
+      }
+    });
+
+    out('  files.length: ' + files.length);
+    files.forEach(function (f, i) {
+      out('    files[' + i + ']: name=' + f.name + ' type=' + (f.type || '—') + ' size=' + f.size);
+    });
+
+    out('  items.length: ' + grabbed.length);
+    grabbed.forEach(function (g, i) {
+      out('    items[' + i + ']: kind=' + g.kind + ' type=' + (g.type || '—') +
+          (g.file ? ' -> File name=' + g.file.name + ' size=' + g.file.size : ' -> getAsFile() ריק'));
+    });
+
+    Object.keys(texts).forEach(function (t) {
+      var v = String(texts[t] || '');
+      out('  ' + t + ' (' + v.length + ' תווים): ' +
+          JSON.stringify(v.length > 300 ? v.slice(0, 300) + '…' : v));
+    });
+
+    files.forEach(function (f, i) { sniff(f, 'files[' + i + ']'); });
+    grabbed.forEach(function (g, i) { if (g.file) sniff(g.file, 'items[' + i + ']'); });
+  }
+
+  function onPaste(where) {
+    return function (e) {
+      rule('אירוע paste · ' + where);
+      dumpDataTransfer(e.clipboardData);
+      /* מונע מהתוכן להישפך לתוך האזור ולהסתיר את הפלט */
+      e.preventDefault();
+    };
+  }
+
+  document.getElementById('ce').addEventListener('paste', onPaste('אזור עריכה'));
+  document.getElementById('ta').addEventListener('paste', onPaste('textarea'));
+  document.addEventListener('paste', function (e) {
+    var t = e.target;
+    if (t && (t.id === 'ce' || t.id === 'ta')) return;
+    rule('אירוע paste · מסמך');
+    dumpDataTransfer(e.clipboardData);
+  });
+
+  document.getElementById('readBtn').addEventListener('click', function () {
+    rule('navigator.clipboard.read');
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      out('  ה-API אינו קיים בדפדפן הזה.');
+      return;
+    }
+    navigator.clipboard.read().then(function (items) {
+      out('  ClipboardItem.length: ' + items.length);
+      items.forEach(function (item, i) {
+        var types = item.types || [];
+        out('  item[' + i + '] types (' + types.length + '): ' + (types.join(', ') || '—'));
+        types.forEach(function (t) {
+          item.getType(t).then(function (blob) {
+            out('    ' + t + ' -> Blob size=' + blob.size + ' type=' + (blob.type || '—'));
+            if (t.indexOf('text/') === 0) {
+              return blob.text().then(function (s) {
+                out('      תוכן: ' + JSON.stringify(s.length > 300 ? s.slice(0, 300) + '…' : s));
+              });
+            }
+            return sniff(blob, t);
+          }).catch(function (e) {
+            out('    ' + t + ' getType נכשל: ' + e.name + ' ' + e.message);
+          });
+        });
+      });
+    }).catch(function (e) {
+      out('  read() נדחה: ' + e.name + ' — ' + e.message);
+      out('  (הרשאה שנדחתה, או שאין מה לקרוא.)');
+    });
+  });
+
+  document.getElementById('fi').addEventListener('change', function (e) {
+    rule('בחירת קובץ');
+    var files = Array.prototype.slice.call(e.target.files || []);
+    out('  files.length: ' + files.length);
+    files.forEach(function (f, i) {
+      out('    files[' + i + ']: name=' + f.name + ' type=' + (f.type || '—') + ' size=' + f.size);
+      sniff(f, 'files[' + i + ']');
+    });
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = lines.join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        out('');
+        out('(הפלט הועתק ללוח — שים לב שזה דרס את ה-PDF שהיה בו.)');
+      });
+    }
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    lines = ['UA: ' + navigator.userAgent, 'נוקה.'];
+    logEl.textContent = lines.join('\n');
+  });
+})();
+</script>
+</body>
+</html>
