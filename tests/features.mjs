@@ -1740,6 +1740,38 @@ t('והחלפת הקובץ בטופס פתוח אינה מאפסת את השיו
   (await p3.inputValue('#d-entity')) === 'b-car');
 
 t('אפס שגיאות קונסול במסלול הזה', errs3.length === 0, errs3.join(' | '));
+
+/* מכאן והלאה ה-500 מכוון, ולכן מונה שגיאות הקונסול נסגר מעליו. */
+/* הדיווח החוזר: "גם כשהפרסינג נכשל, הברירה צריכה להישאר הישות שממנה
+   לחצתי". המסלול הזה — בורר קבצים אמיתי ופרסינג שנכשל — לא היה מכוסה:
+   הבדיקות שלמעלה עוברות בהזנה ידנית ובגרירה, ושתיהן לא נוגעות בצינור. */
+await p3.route('**://generativelanguage.googleapis.com/**', r =>
+  r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"boom"}}' }));
+await p3.evaluate(async () => {
+  await window.Settings.set(window.CONFIG.K.geminiKey, 'FAKE');
+  await window.Settings.set(window.CONFIG.K.geminiConsentImage, true);
+});
+
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF');
+
+async function viaPicker(routeLabel) {
+  await p3.goto(BASE + '#/entity/b-car');
+  await p3.waitForSelector('.fab');
+  await p3.click('.fab');
+  await p3.waitForSelector('.routes');
+  const [chooser] = await Promise.all([
+    p3.waitForEvent('filechooser'),
+    p3.click('.routes .route:has-text("' + routeLabel + '")')
+  ]);
+  await chooser.setFiles({ name: 'policy.pdf', mimeType: 'application/pdf', buffer: PDF });
+  await p3.waitForSelector('#d-entity', { timeout: 15000 });
+  return p3.inputValue('#d-entity');
+}
+
+t('בורר קבצים מתוך ישות, כשהפרסינג נכשל, נשאר על אותה ישות',
+  (await viaPicker('בחירת קובץ')) === 'b-car');
+t('וגם מסלול הצילום', (await viaPicker('צילום')) === 'b-car');
+
 await ctx3.close();
 
 await browser.close();

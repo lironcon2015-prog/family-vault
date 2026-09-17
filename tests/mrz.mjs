@@ -198,17 +198,23 @@ const shot = await page.evaluate(async (s) => {
 }, samples);
 
 /* נקודת עגינה לרגע שבו הקריאה שרצה ברקע באמת הסתיימה. בלעדיה הבדיקה
-   הייתה מודדת השהיה שרירותית ולא את מה שקרה כשהתוצאה הגיעה. */
+   הייתה מודדת השהיה שרירותית ולא את מה שקרה כשהתוצאה הגיעה.
+
+   **והיא גם שער.** בלי השער הבדיקה הייתה מרוץ: OCR שסיים לפני שהבדיקה
+   הספיקה ללחוץ "דלג" מציב את ההצעה בצדק, ואז הבדיקה נכשלת על התנהגות
+   נכונה — כישלון שנראה כמו רגרסיה ואינו. השער מחזיק את התוצאה עד
+   שהדילוג כבר קרה, ולכן הסדר שהבדיקה מתיימרת לבדוק הוא הסדר שקורה. */
 await page.evaluate(() => {
-  window.__mrz = { done: false, type: null };
+  window.__mrz = { done: false, type: null, release: null };
+  const gate = new Promise(res => { window.__mrz.release = res; });
   const orig = window.Parse.fromMrz;
   window.Parse.fromMrz = function () {
-    return orig.apply(this, arguments).then(r => {
+    return orig.apply(this, arguments).then(r => gate.then(() => {
       window.__mrz.done = true;
       window.__mrz.type = r.typeKey;
       window.__mrz.drop = !!r.dropFiles;
       return r;
-    });
+    }));
   };
 });
 
@@ -237,6 +243,9 @@ await page.click('.sheet:has-text("קריאת המסמך") .btn:has-text("דלג
 await page.waitForSelector('#d-type', { timeout: 5000 });
 t('דלג אינו ממתין לסיום הקריאה', Date.now() - tSkip < 3000, String(Date.now() - tSkip) + 'ms');
 t('הטופס נפתח עם הצילום מצורף', (await page.textContent('.scr')).includes('mrz.png'));
+
+/* הדילוג קרה, המסך נמדד — ורק עכשיו התוצאה המאוחרת משוחררת */
+await page.evaluate(() => window.__mrz.release());
 
 await page.waitForFunction(() => window.__mrz && window.__mrz.done, null, { timeout: 90000 });
 const late = await page.evaluate(() => ({
