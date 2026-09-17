@@ -171,7 +171,8 @@
     return {
       x: Math.max(0, Math.min(100, num(f.x, d.x))),
       y: Math.max(0, Math.min(100, num(f.y, d.y))),
-      z: Math.max(1, Math.min(window.CONFIG.CROP_MAX_ZOOM, num(f.z, 1)))
+      z: Math.max(window.CONFIG.CROP_MIN_ZOOM,
+                  Math.min(window.CONFIG.CROP_MAX_ZOOM, num(f.z, 1)))
     };
   };
 
@@ -180,19 +181,57 @@
     return f.x + '% ' + f.y + '%';
   };
 
-  /* שלוש התכונות יוצאות יחד מפונקציה אחת בכוונה. `transform-origin`
-     שזהה ל-`object-position` הוא מה שמקבע את הנקודה שנבחרה בזמן
-     ההגדלה — התמונה גדלה סביבה במקום להחליק ממנה. שתי הצהרות נפרדות
-     באתרי הציור היו נפרדות ביום שמישהו יעדכן רק אחת מהן.
+  /* המסגרת מצוירת בגאומטריה מפורשת ולא ב-`object-fit`, ויש לזה סיבה
+     אחת שגוברת על הפשטות של שורת CSS: **`cover` כבר חתך.** הוא קובע
+     את החיתוך בזמן הפריסה, ו-`transform: scale()` שמוקטן אחריו רק
+     מקטין את החיתוך — הוא אינו מגלה את מה שנחתך. כלומר עם `cover`
+     אפשר להתקרב ואי אפשר להתרחק, וזה בדיוק הפער שדווח.
 
-     המסגרת חייבת אב שחותך: `transform` גולש מעבר לגבול האלמנט, ו-
-     `overflow: hidden` על התמונה עצמה אינו עושה דבר. */
+     לכן התמונה ממוקמת בגודל מפורש: `cover` הוא הגדלה 1, כפול מה
+     שנבחר. מעל 1 היא גדולה מהמסגרת ונחתכת; מתחת ל-1 היא קטנה ממנה
+     ונראית כולה על הרקע.
+
+     **הכל באחוזים ולא בפיקסלים**, ולכן המסגרת שורדת סיבוב מסך ושינוי
+     גודל בלי חישוב מחדש: היחס בין התמונה למסגרת תלוי רק ביחסי הצורה
+     של שתיהן, ואלה אינם משתנים כשהמסגרת גדלה.
+
+     האב חייב `position: relative` ו-`overflow: hidden`. */
   UI.applyFocus = function (img, focus, def) {
     var f = UI.focusOf(focus, def);
-    var pos = f.x + '% ' + f.y + '%';
-    img.style.objectPosition = pos;
-    img.style.transformOrigin = pos;
-    img.style.transform = f.z > 1 ? 'scale(' + f.z + ')' : '';
+
+    /* עד שהתמונה נטענת אין ממדים ואין גאומטריה, ולכן הפריים הראשון
+       מצויר ב-`cover` של ה-CSS. `object-position` נכתב כאן כדי שגם
+       הפריים הזה יהיה מכוון נכון — הוא נעשה חסר משמעות ברגע ש-place
+       מחליף ל-`object-fit: fill`, וזה בדיוק הרגע שבו הוא כבר לא צריך. */
+    img.style.objectPosition = f.x + '% ' + f.y + '%';
+
+    function place() {
+      var host = img.parentElement;
+      if (!host) return;
+      var bw = host.clientWidth, bh = host.clientHeight;
+      var iw = img.naturalWidth, ih = img.naturalHeight;
+      if (!bw || !bh || !iw || !ih) return;
+
+      var cover = Math.max(bw / iw, bh / ih);
+      var rw = (iw * cover * f.z) / bw;
+      var rh = (ih * cover * f.z) / bh;
+
+      img.style.position = 'absolute';
+      img.style.objectFit = 'fill';
+      img.style.width = (rw * 100) + '%';
+      img.style.height = (rh * 100) + '%';
+      /* אותה סמנטיקה של `object-position`: 0 צמוד להתחלה, 100 צמוד
+         לסוף, וכשהתמונה קטנה מהמסגרת 50 הוא מרכז. */
+      img.style.left = ((1 - rw) * f.x) + '%';
+      img.style.top = ((1 - rh) * f.y) + '%';
+    }
+
+    /* קריאה חוזרת מחליפה את הקודמת. בלי ההסרה, בורר שמצייר בכל תזוזה
+       היה צובר מאזינים על אותה תמונה. */
+    if (img.__onFocusLoad) img.removeEventListener('load', img.__onFocusLoad);
+    img.__onFocusLoad = place;
+    img.addEventListener('load', place);
+    if (img.complete && img.naturalWidth) place();
     return f;
   };
 
@@ -606,24 +645,31 @@
       var n = Number(v);
       return isNaN(n) ? d : Math.max(0, Math.min(100, n));
     }
+    /* הרצפה אינה 1. 1 הוא "ממלא את המסגרת", וזו נקודת התחלה ולא גבול:
+       נושא שתופס רבע מהצילום צריך הגדלה, ותמונה שנחתכת במקום הלא נכון
+       צריכה **הקטנה** — עד שכולה נכנסת למסגרת. הרצפה נגזרת מהתמונה
+       בטעינה, ולכן היא מתחילה בקבוע ומתעדכנת. */
+    var minZ = window.CONFIG.CROP_MIN_ZOOM;
     function clampZ(v) {
       var n = Number(v);
-      return isNaN(n) ? 1 : Math.max(1, Math.min(MAXZ, n));
+      return isNaN(n) ? 1 : Math.max(minZ, Math.min(MAXZ, n));
     }
     var pos = { x: clamp(focus && focus.x, def.x), y: clamp(focus && focus.y, def.y) };
     var zoom = clampZ(focus && focus.z);
 
-    /* הסרך של `cover` בהגדלה 1, ולצדו גודל המסגרת. שניהם נחוצים כי
-       הסרך בהגדלה z אינו הכפלה שלו: התמונה גדלה, אבל המסגרת לא. */
-    var slack = { x: 0, y: 0 };
+    /* גודל המסגרת, גודל התמונה, וקנה המידה שבו היא בדיוק מכסה.
+       שלושתם נמדדים פעם אחת, וכל השאר נגזר מהם בכל שינוי. */
     var boxSize = { w: 1, h: 1 };
+    var nat = { w: 1, h: 1 };
+    var cover = 1;
     var loaded = false;
 
-    /* iw*s*z - bw, כתוב דרך הסרך שכבר חושב: (slack + box)*z - box. */
+    /* כמה פיקסלים של תמונה יש מעבר למסגרת בהגדלה הנוכחית. שלילי
+       פירושו שהתמונה קטנה מהמסגרת, ואז אין מה להזיז בציר הזה. */
     function slackAt(axis) {
-      var s0 = axis === 'x' ? slack.x : slack.y;
-      var b = axis === 'x' ? boxSize.w : boxSize.h;
-      return s0 * zoom + b * (zoom - 1);
+      return axis === 'x'
+        ? nat.w * cover * zoom - boxSize.w
+        : nat.h * cover * zoom - boxSize.h;
     }
 
     var isBlob = typeof src !== 'string';
@@ -643,12 +689,13 @@
     /* מחוון ההגדלה קיים גם כשמחוון המיקום כבוי. בעיגול אין ציר אחד
        שאפשר לתלות בו מחוון, אבל להגדלה יש תמיד בדיוק ציר אחד. */
     var zoomI = opts.zoom === false ? null : U.el('input', {
-      type: 'range', min: '100', max: String(Math.round(MAXZ * 100)), step: '5',
+      type: 'range', min: String(Math.round(minZ * 100)),
+      max: String(Math.round(MAXZ * 100)), step: '5',
       value: String(Math.round(zoom * 100)),
-      class: 'crop-range', 'aria-label': 'הגדלת התצוגה'
+      class: 'crop-range', 'aria-label': 'גודל התצוגה'
     });
     var zoomRow = zoomI ? U.el('label', { class: 'crop-zoom' }, [
-      U.el('span', { class: 'muted small', text: 'הגדלה' }), zoomI
+      U.el('span', { class: 'muted small', text: 'גודל' }), zoomI
     ]) : null;
 
     var hint = U.el('p', { class: 'crop-hint muted small', text: opts.hint || 'גרור כדי לבחור מה יוצג' });
@@ -670,7 +717,9 @@
       box.classList.toggle('crop-flat', flat);
       if (slider) slider.disabled = sy <= 1;
 
-      if (flat) {
+      if (flat && zoom < 1) {
+        hint.textContent = 'כל התמונה בתוך המסגרת. הגדל כדי להתקרב.';
+      } else if (flat) {
         hint.textContent = opts.flatHint ||
           'התמונה בדיוק בצורת המסגרת — אין מה להזיז.';
         if (zoomI) hint.textContent += ' הגדלה תפתח מקום לתזוזה.';
@@ -685,14 +734,20 @@
 
     img.addEventListener('load', function () {
       if (isBlob) URL.revokeObjectURL(url);
-      /* הסרך בכל ציר: גודל התמונה כשהיא מכסה את המסגרת, פחות המסגרת.
-         `cover` מותח לפי הציר הצר, ולכן רק אחד מהם יוצא חיובי. */
       boxSize.w = box.clientWidth || 1;
       boxSize.h = box.clientHeight || 1;
-      var iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
-      var scale = Math.max(boxSize.w / iw, boxSize.h / ih);
-      slack.x = iw * scale - boxSize.w;
-      slack.y = ih * scale - boxSize.h;
+      nat.w = img.naturalWidth || 1;
+      nat.h = img.naturalHeight || 1;
+      cover = Math.max(boxSize.w / nat.w, boxSize.h / nat.h);
+
+      /* `cover` הוא הגדלה 1. היחס בין `contain` לבינו הוא ההקטנה שבה
+         כל התמונה נכנסת למסגרת בדיוק — הרצפה האמיתית. בתמונה שכבר
+         בצורת המסגרת השניים שווים, ואז אין מה להקטין. */
+      var contain = Math.min(boxSize.w / nat.w, boxSize.h / nat.h);
+      minZ = Math.max(window.CONFIG.CROP_MIN_ZOOM,
+        Math.round((contain / cover) * 100) / 100);
+      if (zoomI) zoomI.min = String(Math.round(minZ * 100));
+      zoom = clampZ(zoom);
       loaded = true;
       refresh();
     });

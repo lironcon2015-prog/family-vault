@@ -83,7 +83,7 @@
         framer = window.UI.cropper(avatarImage, avatarFocus, {
           shape: 'circle', slider: false,
           label: 'מה יוצג בעיגול האווטאר',
-          hint: 'גרור כדי לבחור מה יוצג, וצבוט כדי להגדיל',
+          hint: 'גרור כדי לבחור מה יוצג, וצבוט כדי להגדיל או להקטין',
           flatHint: 'התמונה ריבועית — כולה נכנסת לעיגול.'
         });
         host.appendChild(framer.element);

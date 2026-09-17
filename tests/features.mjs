@@ -19,6 +19,28 @@ page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
 await page.goto(BASE);
 await page.waitForSelector('.scr-title');
 
+/* המסגרת נמדדת ולא נקראת מ-CSS. המנגנון הוא גאומטריה מפורשת (DEC-46),
+   ובדיקה שקוראת מחרוזת סגנון בודקת את המימוש; מה שצריך להיבדק הוא מה
+   שהמשתמש רואה — כמה מהתמונה נכנס למסגרת, ואיזה חלק ממנה.
+
+   `rw`/`rh` הם יחס התמונה למסגרת: 1 בדיוק ממלא, מעל 1 נחתך, מתחת 1
+   נכנס כולו. `x`/`y` הם אותה סמנטיקה של `object-position`. */
+const frameOf = (pg, sel) => pg.evaluate((s) => {
+  const i = document.querySelector(s);
+  if (!i) return null;
+  const h = i.parentElement;
+  const ir = i.getBoundingClientRect(), hr = h.getBoundingClientRect();
+  const r = (a, b) => Math.round((a / b) * 1000) / 1000;
+  const at = (hs, is, hl, il) => Math.abs(is - hs) < 0.5 ? 50
+    : Math.round(((hl - il) / (is - hs)) * 100);
+  return {
+    rw: r(ir.width, hr.width), rh: r(ir.height, hr.height),
+    x: at(hr.width, ir.width, hr.left, ir.left),
+    y: at(hr.height, ir.height, hr.top, ir.top),
+    fits: ir.width <= hr.width + 1 && ir.height <= hr.height + 1
+  };
+}, sel);
+
 /* ---------- 6 · קנה מידה קבוע ---------- */
 console.log('\n— קנה מידה קבוע —');
 const vp = await page.getAttribute('meta[name="viewport"]', 'content');
@@ -234,7 +256,15 @@ t('וגם לא תמונה אנכית — שם החיתוך הוא הפנים', w
 
 const avShown = await page.evaluate(async () => {
   const e = (await window.DB.listEntities()).filter(x => x.name === 'דנה')[0];
-  e.avatarImage = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+  /* **תמונה גבוהה ולא ריבוע.** בריבוע אין סרך בשום ציר, ולכן המסגרת
+     אינה משנה דבר ואי אפשר למדוד אותה — בדיוק כפי שהמשתמש לא היה
+     רואה בה הבדל. */
+  const c = document.createElement('canvas');
+  c.width = 200; c.height = 400;
+  const cx = c.getContext('2d');
+  cx.fillStyle = '#4B6B7A'; cx.fillRect(0, 0, 200, 400);
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, 200, 80);
+  e.avatarImage = c.toDataURL('image/png');
   await window.DB.saveEntity(e);
   await window.App.render();
   const card = [...document.querySelectorAll('.ecard')]
@@ -250,46 +280,57 @@ t('ישות עם תמונה מציגה תמונה', avShown.img === true);
 t('וישות בלעדיה נשארת עם האות', avShown.letter === 'א', avShown.letter);
 
 /* מסגרת האווטאר — מה שיוצג בתוך העיגול */
-const avFocus = await page.evaluate(async () => {
+const DANA = '.ecard[data-name="דנה"] .av img';
+await page.evaluate(() => {
+  [...document.querySelectorAll('.ecard')].forEach(c => {
+    c.dataset.name = c.querySelector('.card-t').textContent;
+  });
+});
+const avBefore = await frameOf(page, DANA);
+t('אווטאר בלי מסגרת שמורה נשאר במרכז', avBefore.x === 50 && avBefore.y === 50,
+  JSON.stringify(avBefore));
+t('ובלי הגדלה הוא בדיוק ממלא את העיגול', avBefore.rw >= 1 && avBefore.rh >= 1 &&
+  Math.min(avBefore.rw, avBefore.rh) === 1, avBefore.rw + 'x' + avBefore.rh);
+t('ותמונה גבוהה גולשת בציר האנכי בלבד', avBefore.rw === 1 && avBefore.rh === 2,
+  avBefore.rw + 'x' + avBefore.rh);
+
+await page.evaluate(async () => {
   const DB = window.DB;
-  const before = document.querySelector('.ecard .av img');
-  const beforePos = before ? before.style.objectPosition : '';
   const e = (await DB.listEntities()).filter(x => x.name === 'דנה')[0];
   e.avatarFocus = { x: 30, y: 80 };
   await DB.saveEntity(e);
   await window.App.render();
-  const after = [...document.querySelectorAll('.ecard')]
-    .filter(c => c.querySelector('.card-t').textContent === 'דנה')[0]
-    .querySelector('.av img');
-  return {
-    beforePos: beforePos, afterPos: after.style.objectPosition,
-    beforeScale: before ? before.style.transform : '', afterScale: after.style.transform
-  };
+  [...document.querySelectorAll('.ecard')].forEach(c => {
+    c.dataset.name = c.querySelector('.card-t').textContent;
+  });
 });
-t('אווטאר בלי מסגרת שמורה נשאר במרכז', avFocus.beforePos === '50% 50%', avFocus.beforePos);
-t('והמסגרת שנבחרה מצוירת', avFocus.afterPos === '30% 80%', avFocus.afterPos);
-t('ומסגרת בלי הגדלה אינה מותחת כלום', avFocus.beforeScale === '' && avFocus.afterScale === '',
-  avFocus.afterScale);
+await page.waitForTimeout(150);
+const avAfter = await frameOf(page, DANA);
+/* בציר שאין בו סרך אין מה למדוד, ולכן נבדק הציר שיש בו */
+t('והמסגרת שנבחרה מצוירת', avAfter.y === 80, JSON.stringify(avAfter));
 
 /* ההגדלה — המספר השלישי במסגרת. `transform-origin` חייב להיות זהה
    ל-`object-position`, אחרת התמונה גדלה סביב המרכז ומחליקה מהנקודה
    שנבחרה. זו הבדיקה ששומרת על זה. */
-const avZoom = await page.evaluate(async () => {
+await page.evaluate(async () => {
   const DB = window.DB;
   const e = (await DB.listEntities()).filter(x => x.name === 'דנה')[0];
   e.avatarFocus = { x: 30, y: 80, z: 2 };
   await DB.saveEntity(e);
   await window.App.render();
-  const img = [...document.querySelectorAll('.ecard')]
-    .filter(c => c.querySelector('.card-t').textContent === 'דנה')[0]
-    .querySelector('.av img');
-  return { pos: img.style.objectPosition, origin: img.style.transformOrigin,
-           scale: img.style.transform };
+  [...document.querySelectorAll('.ecard')].forEach(c => {
+    c.dataset.name = c.querySelector('.card-t').textContent;
+  });
 });
-t('הגדלה שנשמרה על הישות מצוירת בעיגול', avZoom.scale === 'scale(2)', avZoom.scale);
-t('והיא גדלה סביב הנקודה שנבחרה ולא סביב המרכז',
-  avZoom.origin === avZoom.pos && avZoom.pos === '30% 80%',
-  avZoom.origin + ' vs ' + avZoom.pos);
+await page.waitForTimeout(150);
+const avZoom = await frameOf(page, DANA);
+t('הגדלה שנשמרה על הישות מצוירת בעיגול',
+  Math.abs(avZoom.rw / avBefore.rw - 2) < 0.02 &&
+  Math.abs(avZoom.rh / avBefore.rh - 2) < 0.02,
+  avZoom.rw + '/' + avBefore.rw);
+t('והנקודה שנבחרה נשארת הנקודה שנבחרה גם בהגדלה',
+  avZoom.x === 30 && avZoom.y === 80, JSON.stringify(avZoom));
+t('ובהגדלה גם הציר הרוחבי נעשה מדיד', avZoom.rw > 1, String(avZoom.rw));
 t('והעיגול חותך את מה שגלש', await page.evaluate(() =>
   getComputedStyle(document.querySelector('.ecard .av')).overflow === 'hidden'));
 
@@ -307,8 +348,9 @@ t('ובלי מחוון מיקום — בעיגול גוררים לשני הכי�
 await page.focus('.crop-box');
 await page.keyboard.press('ArrowRight');
 await page.keyboard.press('ArrowDown');
-const moved = await page.evaluate(() => document.querySelector('.crop-img').style.objectPosition);
-t('חיצים מזיזים את המסגרת בשני הצירים', moved === '34% 84%', moved);
+const moved = await frameOf(page, '.crop-img');
+t('חיצים מזיזים את המסגרת בשני הצירים', moved.x === 34 && moved.y === 84,
+  JSON.stringify(moved));
 
 await page.click('.sheet-actions .btn:not(.ghost)');
 await page.waitForSelector('.backdrop', { state: 'detached' });
@@ -695,8 +737,9 @@ await page.evaluate(async () => {
 
 await page.goto(BASE + '#/doc/crop-1');
 await page.waitForSelector('img.anchor');
+const anchorDefault = await frameOf(page, 'img.anchor');
 t('בלי בחירה, העוגן בראש התמונה',
-  (await page.evaluate(() => document.querySelector('img.anchor').style.objectPosition)) === '50% 0%');
+  anchorDefault.x === 50 && anchorDefault.y === 0, JSON.stringify(anchorDefault));
 
 await page.goto(BASE + '#/doc/crop-1/edit');
 await page.waitForSelector('.crop-box');
@@ -719,16 +762,18 @@ await page.evaluate(() => {
   s.value = '70';
   s.dispatchEvent(new Event('input'));
 });
-t('והמחוון והתצוגה קשורים זה לזה',
-  (await page.evaluate(() => document.querySelector('.crop-img').style.objectPosition)) === '50% 70%');
+const linked = await frameOf(page, '.crop-img');
+t('והמחוון והתצוגה קשורים זה לזה', linked.x === 50 && linked.y === 70,
+  JSON.stringify(linked));
 
 await page.click('#doc-save');
 await page.waitForSelector('.doc-head');
 await page.waitForTimeout(250);
 t('הבחירה נשמרת על הקובץ',
   (await page.evaluate(async () => (await window.DB.get('docs', 'crop-1')).files[0].focusY)) === 70);
-t('והעוגן מצייר אותה',
-  (await page.evaluate(() => document.querySelector('img.anchor').style.objectPosition)) === '50% 70%');
+const anchorDrawn = await frameOf(page, 'img.anchor');
+t('והעוגן מצייר אותה', anchorDrawn.x === 50 && anchorDrawn.y === 70,
+  JSON.stringify(anchorDrawn));
 
 await page.goto(BASE + '#/doc/crop-1/edit');
 await page.waitForSelector('.crop-range');
@@ -739,24 +784,54 @@ t('פתיחה מחדש של העריכה מציגה את מה שנבחר',
 /* ---------- הגדלה בבורר המסגרת ----------
    הדיווח: "אני רוצה לא רק להזיז את התמונה אלא גם להקטין ולהגדיל".
    מיקום בלבד אינו מספיק כשהנושא תופס רבע מהצילום. */
-t('לבורר יש מחוון הגדלה', (await page.locator('.crop-zoom .crop-range').count()) === 1);
-t('והוא מתחיל ב-100 אחוז, כלומר בלי הגדלה',
+t('לבורר יש מחוון גודל', (await page.locator('.crop-zoom .crop-range').count()) === 1);
+t('והוא מתחיל ב-100 אחוז, כלומר ממלא את המסגרת',
   (await page.inputValue('.crop-zoom .crop-range')) === '100');
-t('ומסגרת בלי הגדלה אינה מותחת את התצוגה',
-  (await page.evaluate(() => document.querySelector('.crop-img').style.transform)) === '');
+
+const atOne = await frameOf(page, '.crop-img');
+t('ובגודל 100 התמונה בדיוק ממלאת את המסגרת',
+  Math.min(atOne.rw, atOne.rh) === 1 && atOne.rw >= 1 && atOne.rh >= 1,
+  atOne.rw + 'x' + atOne.rh);
+
+/* הדיווח השני: "נותן לי רק להגדיל ולא להקטין". 100 הוא נקודת ההתחלה
+   ולא הרצפה — מתחתיו התמונה מתכווצת עד שכולה בתוך המסגרת. */
+const floorAt = await page.evaluate(() =>
+  Number(document.querySelector('.crop-zoom .crop-range').min));
+t('והרצפה שלו מתחת ל-100, כלומר אפשר גם להקטין', floorAt < 100, String(floorAt));
+
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = z.min;
+  z.dispatchEvent(new Event('input'));
+});
+const shrunk = await frameOf(page, '.crop-img');
+const shrunkHint = await page.textContent('.crop-hint');
+t('ההקטנה מכווצת את התצוגה', shrunk.rw < atOne.rw && shrunk.rh < atOne.rh,
+  shrunk.rw + 'x' + shrunk.rh);
+/* זו הבדיקה שתופסת את הבאג האמיתי: `object-fit: cover` עם `scale`
+   מקטין את החיתוך ואינו מגלה את מה שנחתך, ואז `fits` לעולם לא מתקיים
+   בשני הצירים. רק גאומטריה מפורשת מגיעה לכאן. */
+t('וברצפה כל התמונה נכנסת למסגרת', shrunk.fits === true,
+  shrunk.rw + 'x' + shrunk.rh);
+t('וההודעה אומרת את זה', /כל התמונה/.test(shrunkHint), shrunkHint);
+
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = '100';
+  z.dispatchEvent(new Event('input'));
+});
 
 await page.evaluate(() => {
   const z = document.querySelector('.crop-zoom .crop-range');
   z.value = '200';
   z.dispatchEvent(new Event('input'));
 });
-const zoomed = await page.evaluate(() => {
-  const i = document.querySelector('.crop-img');
-  return { t: i.style.transform, o: i.style.transformOrigin, p: i.style.objectPosition };
-});
-t('הזזת המחוון מגדילה את התצוגה', zoomed.t === 'scale(2)', zoomed.t);
-t('וההגדלה סביב הנקודה שנבחרה', zoomed.o === zoomed.p && zoomed.p === '50% 70%',
-  zoomed.o + ' vs ' + zoomed.p);
+const zoomed = await frameOf(page, '.crop-img');
+t('הזזת המחוון מגדילה את התצוגה',
+  Math.abs(zoomed.rw / atOne.rw - 2) < 0.02 && Math.abs(zoomed.rh / atOne.rh - 2) < 0.02,
+  zoomed.rw + '/' + atOne.rw);
+t('והנקודה שנבחרה נשמרת בהגדלה', zoomed.x === 50 && zoomed.y === 70,
+  JSON.stringify(zoomed));
 
 await page.click('#doc-save');
 await page.waitForSelector('.doc-head');
@@ -767,8 +842,10 @@ t('ההגדלה נשמרת על הקובץ', savedFrame.focusZ === 2, String(sav
 t('וגם הציר הרוחבי, שנעשה חי ברגע שיש הגדלה',
   savedFrame.focusX === 50, String(savedFrame.focusX));
 t('והמיקום לא נפגע', savedFrame.focusY === 70, String(savedFrame.focusY));
+const anchorZoom = await frameOf(page, 'img.anchor');
 t('והעוגן מצייר את ההגדלה',
-  (await page.evaluate(() => document.querySelector('img.anchor').style.transform)) === 'scale(2)');
+  Math.abs(anchorZoom.rw / anchorDrawn.rw - 2) < 0.02,
+  anchorZoom.rw + '/' + anchorDrawn.rw);
 t('והעוגן יושב במעטפת שחותכת את מה שגלש', await page.evaluate(() => {
   const w = document.querySelector('.anchor-wrap');
   return !!w && w.contains(document.querySelector('img.anchor')) &&
@@ -791,8 +868,31 @@ await page.evaluate(() => {
   z.value = '100';
   z.dispatchEvent(new Event('input'));
 });
-t('וחזרה ל-100 מסירה את המתיחה לגמרי, ולא משאירה scale(1)',
-  (await page.evaluate(() => document.querySelector('.crop-img').style.transform)) === '');
+const backToOne = await frameOf(page, '.crop-img');
+t('וחזרה ל-100 מחזירה בדיוק למילוי המסגרת',
+  Math.min(backToOne.rw, backToOne.rh) === 1, backToOne.rw + 'x' + backToOne.rh);
+
+/* הקטנה היא בחירה ככל בחירה אחרת, ולכן היא נשמרת ומצוירת כמוה */
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = z.min;
+  z.dispatchEvent(new Event('input'));
+});
+const smallZ = await page.evaluate(() =>
+  Number(document.querySelector('.crop-zoom .crop-range').value) / 100);
+await page.click('#doc-save');
+await page.waitForSelector('.doc-head');
+await page.waitForTimeout(250);
+const savedSmall = await page.evaluate(async () =>
+  (await window.DB.get('docs', 'crop-1')).files[0].focusZ);
+t('הקטנה נשמרת על הקובץ כמו הגדלה', savedSmall === smallZ && savedSmall < 1,
+  String(savedSmall));
+const anchorSmall = await frameOf(page, 'img.anchor');
+t('והעוגן מצייר גם אותה',
+  Math.abs(anchorSmall.rw / anchorDrawn.rw - smallZ) < 0.02,
+  anchorSmall.rw + '/' + anchorDrawn.rw);
+t('והמעטפת מציגה רקע במקום לחתוך', anchorSmall.fits === true,
+  anchorSmall.rw + 'x' + anchorSmall.rh);
 
 await page.goto(BASE + '#/doc/crop-2/edit');
 await page.waitForSelector('.crop-range');
@@ -835,6 +935,7 @@ const focusSync = await page.evaluate(async () => {
   const oldOne = out.writes.filter(w => w.id === 'crop-old')[0].files[0];
   return {
     merged: out.writes[0].files[0], exported: mine.files[0],
+    mineZ: doc.files[0].focusZ,
     oldZ: oldOne.focusZ, oldX: oldOne.focusX
   };
 });
@@ -842,7 +943,9 @@ t('המסגרת נוסעת בייצוא לדרייב', focusSync.exported.focusY
   String(focusSync.exported.focusY));
 t('ושורדת מיזוג במקום להתאפס', focusSync.merged.focusY === 70,
   String(focusSync.merged.focusY));
-t('וגם ההגדלה נוסעת', focusSync.exported.focusZ === 2 && focusSync.merged.focusZ === 1.5,
+t('וגם ההגדלה נוסעת — בשני הכיוונים',
+  focusSync.exported.focusZ === focusSync.mineZ && focusSync.mineZ < 1 &&
+  focusSync.merged.focusZ === 1.5,
   focusSync.exported.focusZ + ' / ' + focusSync.merged.focusZ);
 t('וגם הציר הרוחבי', focusSync.exported.focusX === 50 && focusSync.merged.focusX === 40,
   focusSync.exported.focusX + ' / ' + focusSync.merged.focusX);
@@ -1668,6 +1771,16 @@ const homeScreen = await page.evaluate(async () => {
   location.hash = '#/entities';
   await window.App.render();
 
+  /* המסגרת מצוירת כשהתמונה נטענת, ולכן מדידה מיד אחרי render הייתה
+     תופסת את הפריים שלפניה. */
+  await new Promise(res => {
+    const img = document.querySelector('.ecard .av img');
+    if (!img || (img.complete && img.naturalWidth)) return res();
+    img.addEventListener('load', res, { once: true });
+    setTimeout(res, 1000);
+  });
+  await new Promise(res => requestAnimationFrame(res));
+
   const q = sel => document.querySelector(sel);
   const tile = id => q('.egroup .ecard[data-id="' + id + '"]');
 
@@ -1678,6 +1791,8 @@ const homeScreen = await page.evaluate(async () => {
     railLayout: urgent.closest('.egroup').dataset.layout,
     boardLayout: asset.closest('.egroup').dataset.layout,
     hasImg: !!img,
+    /* התמונה כאן היא פיקסל בודד — ריבוע בעיגול, בלי סרך בשום ציר,
+       ולכן אין גאומטריה למדוד. מה שנבדק הוא שהמסגרת הגיעה לתמונה. */
     focus: img ? img.style.objectPosition : '',
     avSize: Math.round(urgent.querySelector('.av').getBoundingClientRect().width),
     ring: urgent.querySelector('.av').className,
