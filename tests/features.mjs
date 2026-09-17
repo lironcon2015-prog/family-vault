@@ -261,19 +261,47 @@ const avFocus = await page.evaluate(async () => {
   const after = [...document.querySelectorAll('.ecard')]
     .filter(c => c.querySelector('.card-t').textContent === 'דנה')[0]
     .querySelector('.av img');
-  return { beforePos: beforePos, afterPos: after.style.objectPosition };
+  return {
+    beforePos: beforePos, afterPos: after.style.objectPosition,
+    beforeScale: before ? before.style.transform : '', afterScale: after.style.transform
+  };
 });
 t('אווטאר בלי מסגרת שמורה נשאר במרכז', avFocus.beforePos === '50% 50%', avFocus.beforePos);
 t('והמסגרת שנבחרה מצוירת', avFocus.afterPos === '30% 80%', avFocus.afterPos);
+t('ומסגרת בלי הגדלה אינה מותחת כלום', avFocus.beforeScale === '' && avFocus.afterScale === '',
+  avFocus.afterScale);
+
+/* ההגדלה — המספר השלישי במסגרת. `transform-origin` חייב להיות זהה
+   ל-`object-position`, אחרת התמונה גדלה סביב המרכז ומחליקה מהנקודה
+   שנבחרה. זו הבדיקה ששומרת על זה. */
+const avZoom = await page.evaluate(async () => {
+  const DB = window.DB;
+  const e = (await DB.listEntities()).filter(x => x.name === 'דנה')[0];
+  e.avatarFocus = { x: 30, y: 80, z: 2 };
+  await DB.saveEntity(e);
+  await window.App.render();
+  const img = [...document.querySelectorAll('.ecard')]
+    .filter(c => c.querySelector('.card-t').textContent === 'דנה')[0]
+    .querySelector('.av img');
+  return { pos: img.style.objectPosition, origin: img.style.transformOrigin,
+           scale: img.style.transform };
+});
+t('הגדלה שנשמרה על הישות מצוירת בעיגול', avZoom.scale === 'scale(2)', avZoom.scale);
+t('והיא גדלה סביב הנקודה שנבחרה ולא סביב המרכז',
+  avZoom.origin === avZoom.pos && avZoom.pos === '30% 80%',
+  avZoom.origin + ' vs ' + avZoom.pos);
+t('והעיגול חותך את מה שגלש', await page.evaluate(() =>
+  getComputedStyle(document.querySelector('.ecard .av')).overflow === 'hidden'));
 
 await page.evaluate(() => window.Screens.entitySheet(
   window.Screens.state.entities.filter(e => e.name === 'דנה')[0]));
 await page.waitForSelector('#e-name');
 await page.waitForTimeout(200);
 t('טופס הישות מציג בורר עגול', await page.isVisible('.crop-circle'));
-t('ובלי מחוון — בעיגול גוררים לשני הכיוונים',
+t('ובלי מחוון מיקום — בעיגול גוררים לשני הכיוונים',
   (await page.locator('.crop-circle').count()) === 1 &&
-  (await page.locator('.crop-range').count()) === 0);
+  (await page.locator('.crop .crop-range').count()) === 1 &&
+  (await page.locator('.crop-zoom .crop-range').count()) === 1);
 
 /* מקשי החיצים הם הדרך היחידה להזיז בלי עכבר, ובעיגול גם לרוחב */
 await page.focus('.crop-box');
@@ -708,29 +736,120 @@ await page.waitForTimeout(250);
 t('פתיחה מחדש של העריכה מציגה את מה שנבחר',
   (await page.evaluate(() => document.querySelector('.crop-range').value)) === '70');
 
+/* ---------- הגדלה בבורר המסגרת ----------
+   הדיווח: "אני רוצה לא רק להזיז את התמונה אלא גם להקטין ולהגדיל".
+   מיקום בלבד אינו מספיק כשהנושא תופס רבע מהצילום. */
+t('לבורר יש מחוון הגדלה', (await page.locator('.crop-zoom .crop-range').count()) === 1);
+t('והוא מתחיל ב-100 אחוז, כלומר בלי הגדלה',
+  (await page.inputValue('.crop-zoom .crop-range')) === '100');
+t('ומסגרת בלי הגדלה אינה מותחת את התצוגה',
+  (await page.evaluate(() => document.querySelector('.crop-img').style.transform)) === '');
+
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = '200';
+  z.dispatchEvent(new Event('input'));
+});
+const zoomed = await page.evaluate(() => {
+  const i = document.querySelector('.crop-img');
+  return { t: i.style.transform, o: i.style.transformOrigin, p: i.style.objectPosition };
+});
+t('הזזת המחוון מגדילה את התצוגה', zoomed.t === 'scale(2)', zoomed.t);
+t('וההגדלה סביב הנקודה שנבחרה', zoomed.o === zoomed.p && zoomed.p === '50% 70%',
+  zoomed.o + ' vs ' + zoomed.p);
+
+await page.click('#doc-save');
+await page.waitForSelector('.doc-head');
+await page.waitForTimeout(250);
+const savedFrame = await page.evaluate(async () =>
+  (await window.DB.get('docs', 'crop-1')).files[0]);
+t('ההגדלה נשמרת על הקובץ', savedFrame.focusZ === 2, String(savedFrame.focusZ));
+t('וגם הציר הרוחבי, שנעשה חי ברגע שיש הגדלה',
+  savedFrame.focusX === 50, String(savedFrame.focusX));
+t('והמיקום לא נפגע', savedFrame.focusY === 70, String(savedFrame.focusY));
+t('והעוגן מצייר את ההגדלה',
+  (await page.evaluate(() => document.querySelector('img.anchor').style.transform)) === 'scale(2)');
+t('והעוגן יושב במעטפת שחותכת את מה שגלש', await page.evaluate(() => {
+  const w = document.querySelector('.anchor-wrap');
+  return !!w && w.contains(document.querySelector('img.anchor')) &&
+         getComputedStyle(w).overflow === 'hidden';
+}));
+t('ולחיצה על העוגן עדיין פותחת את הצופה', await page.evaluate(() => {
+  document.querySelector('.anchor-wrap').click();
+  return !!document.querySelector('.viewer, .zoom-stage');
+}));
+await page.keyboard.press('Escape');
+
+await page.goto(BASE + '#/doc/crop-1/edit');
+await page.waitForSelector('.crop-zoom .crop-range');
+await page.waitForTimeout(250);
+t('פתיחה מחדש מציגה את ההגדלה שנבחרה',
+  (await page.inputValue('.crop-zoom .crop-range')) === '200');
+
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = '100';
+  z.dispatchEvent(new Event('input'));
+});
+t('וחזרה ל-100 מסירה את המתיחה לגמרי, ולא משאירה scale(1)',
+  (await page.evaluate(() => document.querySelector('.crop-img').style.transform)) === '');
+
 await page.goto(BASE + '#/doc/crop-2/edit');
 await page.waitForSelector('.crop-range');
 await page.waitForTimeout(300);
 const flat = await page.evaluate(() => ({
   off: document.querySelector('.crop-range').disabled,
-  hint: document.querySelector('.crop .muted').textContent
+  hint: document.querySelector('.crop-hint').textContent
 }));
 t('בתמונה רחבה מהמסגרת הבורר מושבת', flat.off === true);
 t('ואומר למה, במקום להזיז ולא לעשות כלום', /רחבה מהמסגרת/.test(flat.hint), flat.hint);
+
+/* הליבה של החישוב: הסרך בהגדלה z אינו הכפלה של הסרך ב-1, מפני
+   שהתמונה גדלה והמסגרת לא. ציר שלא היה בו מה להזיז נעשה חי. */
+await page.evaluate(() => {
+  const z = document.querySelector('.crop-zoom .crop-range');
+  z.value = '150';
+  z.dispatchEvent(new Event('input'));
+});
+const opened = await page.evaluate(() => ({
+  off: document.querySelector('.crop-range').disabled,
+  hint: document.querySelector('.crop-hint').textContent
+}));
+t('הגדלה פותחת מקום לתזוזה בציר שלא היה בו', opened.off === false);
+t('וההודעה מפסיקה לומר שאין מה להזיז', !/רחבה מהמסגרת/.test(opened.hint), opened.hint);
 
 const focusSync = await page.evaluate(async () => {
   const doc = await window.DB.get('docs', 'crop-1');
   const out = window.Sync.mergeRecords('docs', [
     { id: 'crop-1', updatedAt: (doc.updatedAt || 0) + 1000, entityId: 'e-itamar',
       typeKey: 'generic', title: 'תעודה גבוהה', fields: [], deleted: 0,
-      files: [{ driveFileId: 'g1', mime: 'image/png', name: 'tall.png', size: 9, focusY: 70 }] }
+      files: [{ driveFileId: 'g1', mime: 'image/png', name: 'tall.png', size: 9,
+                focusX: 40, focusY: 70, focusZ: 1.5 }] },
+    /* קובץ מצד מרוחק ישן, מלפני שההגדלה הייתה קיימת */
+    { id: 'crop-old', updatedAt: 9, entityId: 'e-itamar', typeKey: 'generic',
+      title: 'ישן', fields: [], deleted: 0,
+      files: [{ driveFileId: 'g2', mime: 'image/png', name: 'o.png', size: 9, focusY: 20 }] }
   ], [doc]);
   const exported = await window.Sync.exportDb();
   const mine = exported.docs.filter(d => d.id === 'crop-1')[0];
-  return { merged: out.writes[0].files[0].focusY, exported: mine.files[0].focusY };
+  const oldOne = out.writes.filter(w => w.id === 'crop-old')[0].files[0];
+  return {
+    merged: out.writes[0].files[0], exported: mine.files[0],
+    oldZ: oldOne.focusZ, oldX: oldOne.focusX
+  };
 });
-t('המסגרת נוסעת בייצוא לדרייב', focusSync.exported === 70, String(focusSync.exported));
-t('ושורדת מיזוג במקום להתאפס', focusSync.merged === 70, String(focusSync.merged));
+t('המסגרת נוסעת בייצוא לדרייב', focusSync.exported.focusY === 70,
+  String(focusSync.exported.focusY));
+t('ושורדת מיזוג במקום להתאפס', focusSync.merged.focusY === 70,
+  String(focusSync.merged.focusY));
+t('וגם ההגדלה נוסעת', focusSync.exported.focusZ === 2 && focusSync.merged.focusZ === 1.5,
+  focusSync.exported.focusZ + ' / ' + focusSync.merged.focusZ);
+t('וגם הציר הרוחבי', focusSync.exported.focusX === 50 && focusSync.merged.focusX === 40,
+  focusSync.exported.focusX + ' / ' + focusSync.merged.focusX);
+/* ברירת המחדל של הגדלה היא 1 ולא 0 — אחרת מסמך שנשמר לפני התכונה
+   היה חוזר מהמיזוג בהגדלה אפס, כלומר נעלם. */
+t('וקובץ ישן בלי הגדלה חוזר עם 1, לא עם 0', focusSync.oldZ === 1, String(focusSync.oldZ));
+t('ובלי ציר רוחבי חוזר עם מרכז', focusSync.oldX === 50, String(focusSync.oldX));
 
 /* ---------- 1 · הדבקת קובץ ---------- */
 console.log('\n— הדבקת קובץ —');

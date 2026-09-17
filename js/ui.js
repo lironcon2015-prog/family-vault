@@ -120,7 +120,7 @@
     var e = entity || {};
     if (e.avatarImage) {
       var img = U.el('img', { src: e.avatarImage, alt: '' });
-      img.style.objectPosition = UI.focusCss(e.avatarFocus);
+      UI.applyFocus(img, e.avatarFocus);
       return img;
     }
     var meta = (window.CONFIG.ENTITY_TYPES.filter(function (t) {
@@ -153,7 +153,7 @@
       var img = U.el('img', { src: e.avatarImage, alt: '' });
       /* המסגרת שנבחרה. ברירת המחדל היא מרכז — וזה בדיוק מה שאווטאר
          שנשמר לפני שהבורר היה קיים כבר נראה, ולכן הוא אינו משתנה. */
-      img.style.objectPosition = UI.focusCss(e.avatarFocus);
+      UI.applyFocus(img, e.avatarFocus);
       box.appendChild(img);
     } else {
       box.appendChild(U.el('span', { text: (e.avatar || (e.name || '?').trim()[0] || '?') }));
@@ -161,12 +161,39 @@
     return box;
   };
 
-  UI.focusCss = function (focus, def) {
+  /* מסגרת היא שלושה מספרים — שני צירים והגדלה — ולא שניים. `z` חסר
+     פירושו 1, ולכן כל אווטאר וכל מסמך שנשמרו לפני שההגדלה הייתה קיימת
+     נראים בדיוק כפי שנראו. */
+  UI.focusOf = function (focus, def) {
     var d = def || { x: 50, y: 50 };
     var f = focus || {};
-    var x = isNaN(Number(f.x)) ? d.x : Number(f.x);
-    var y = isNaN(Number(f.y)) ? d.y : Number(f.y);
-    return x + '% ' + y + '%';
+    function num(v, dv) { var n = Number(v); return isNaN(n) ? dv : n; }
+    return {
+      x: Math.max(0, Math.min(100, num(f.x, d.x))),
+      y: Math.max(0, Math.min(100, num(f.y, d.y))),
+      z: Math.max(1, Math.min(window.CONFIG.CROP_MAX_ZOOM, num(f.z, 1)))
+    };
+  };
+
+  UI.focusCss = function (focus, def) {
+    var f = UI.focusOf(focus, def);
+    return f.x + '% ' + f.y + '%';
+  };
+
+  /* שלוש התכונות יוצאות יחד מפונקציה אחת בכוונה. `transform-origin`
+     שזהה ל-`object-position` הוא מה שמקבע את הנקודה שנבחרה בזמן
+     ההגדלה — התמונה גדלה סביבה במקום להחליק ממנה. שתי הצהרות נפרדות
+     באתרי הציור היו נפרדות ביום שמישהו יעדכן רק אחת מהן.
+
+     המסגרת חייבת אב שחותך: `transform` גולש מעבר לגבול האלמנט, ו-
+     `overflow: hidden` על התמונה עצמה אינו עושה דבר. */
+  UI.applyFocus = function (img, focus, def) {
+    var f = UI.focusOf(focus, def);
+    var pos = f.x + '% ' + f.y + '%';
+    img.style.objectPosition = pos;
+    img.style.transformOrigin = pos;
+    img.style.transform = f.z > 1 ? 'scale(' + f.z + ')' : '';
+    return f;
   };
 
   /* ---------- מצב ריק — הפעולה בתוך המסגרת ----------
@@ -573,13 +600,31 @@
      בחנות ה-blobs. `URL.createObjectURL` נוצר ומבוטל רק במקרה הראשון. */
   UI.cropper = function (src, focus, opts) {
     opts = opts || {};
+    var MAXZ = window.CONFIG.CROP_MAX_ZOOM;
     var def = opts.defaultFocus || { x: 50, y: 50 };
     function clamp(v, d) {
       var n = Number(v);
       return isNaN(n) ? d : Math.max(0, Math.min(100, n));
     }
+    function clampZ(v) {
+      var n = Number(v);
+      return isNaN(n) ? 1 : Math.max(1, Math.min(MAXZ, n));
+    }
     var pos = { x: clamp(focus && focus.x, def.x), y: clamp(focus && focus.y, def.y) };
+    var zoom = clampZ(focus && focus.z);
+
+    /* הסרך של `cover` בהגדלה 1, ולצדו גודל המסגרת. שניהם נחוצים כי
+       הסרך בהגדלה z אינו הכפלה שלו: התמונה גדלה, אבל המסגרת לא. */
     var slack = { x: 0, y: 0 };
+    var boxSize = { w: 1, h: 1 };
+    var loaded = false;
+
+    /* iw*s*z - bw, כתוב דרך הסרך שכבר חושב: (slack + box)*z - box. */
+    function slackAt(axis) {
+      var s0 = axis === 'x' ? slack.x : slack.y;
+      var b = axis === 'x' ? boxSize.w : boxSize.h;
+      return s0 * zoom + b * (zoom - 1);
+    }
 
     var isBlob = typeof src !== 'string';
     var url = isBlob ? URL.createObjectURL(src) : src;
@@ -594,35 +639,62 @@
       type: 'range', min: '0', max: '100', step: '1', value: String(pos.y),
       class: 'crop-range', 'aria-label': opts.label || 'מיקום התצוגה המקדימה'
     });
-    var hint = U.el('p', { class: 'muted small', text: opts.hint || 'גרור כדי לבחור מה יוצג' });
+
+    /* מחוון ההגדלה קיים גם כשמחוון המיקום כבוי. בעיגול אין ציר אחד
+       שאפשר לתלות בו מחוון, אבל להגדלה יש תמיד בדיוק ציר אחד. */
+    var zoomI = opts.zoom === false ? null : U.el('input', {
+      type: 'range', min: '100', max: String(Math.round(MAXZ * 100)), step: '5',
+      value: String(Math.round(zoom * 100)),
+      class: 'crop-range', 'aria-label': 'הגדלת התצוגה'
+    });
+    var zoomRow = zoomI ? U.el('label', { class: 'crop-zoom' }, [
+      U.el('span', { class: 'muted small', text: 'הגדלה' }), zoomI
+    ]) : null;
+
+    var hint = U.el('p', { class: 'crop-hint muted small', text: opts.hint || 'גרור כדי לבחור מה יוצג' });
 
     function paint() {
-      img.style.objectPosition = pos.x + '% ' + pos.y + '%';
+      UI.applyFocus(img, { x: pos.x, y: pos.y, z: zoom }, def);
       if (slider) slider.value = String(Math.round(pos.y));
+      if (zoomI) zoomI.value = String(Math.round(zoom * 100));
     }
+
+    /* מה שניתן להזזה משתנה עם ההגדלה, ולכן ההודעה והמחוונים נגזרים
+       מחדש בכל שינוי ולא פעם אחת בטעינה. תמונה ריבועית בעיגול היא
+       "אין מה להזיז" בהגדלה 1 — וברגע שמגדילים, יש. */
+    function refresh() {
+      paint();
+      if (!loaded) return;
+      var sx = slackAt('x'), sy = slackAt('y');
+      var flat = sx <= 1 && sy <= 1;
+      box.classList.toggle('crop-flat', flat);
+      if (slider) slider.disabled = sy <= 1;
+
+      if (flat) {
+        hint.textContent = opts.flatHint ||
+          'התמונה בדיוק בצורת המסגרת — אין מה להזיז.';
+        if (zoomI) hint.textContent += ' הגדלה תפתח מקום לתזוזה.';
+      } else if (sy <= 1) {
+        hint.textContent = 'התמונה רחבה מהמסגרת ונחתכת לרוחב — אין מה להזיז לאורך.';
+      } else {
+        hint.textContent = opts.hint || 'גרור כדי לבחור מה יוצג';
+      }
+    }
+
     paint();
 
     img.addEventListener('load', function () {
       if (isBlob) URL.revokeObjectURL(url);
       /* הסרך בכל ציר: גודל התמונה כשהיא מכסה את המסגרת, פחות המסגרת.
          `cover` מותח לפי הציר הצר, ולכן רק אחד מהם יוצא חיובי. */
-      var bw = box.clientWidth || 1, bh = box.clientHeight || 1;
+      boxSize.w = box.clientWidth || 1;
+      boxSize.h = box.clientHeight || 1;
       var iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
-      var scale = Math.max(bw / iw, bh / ih);
-      slack.x = iw * scale - bw;
-      slack.y = ih * scale - bh;
-
-      if (slack.x <= 1 && slack.y <= 1) {
-        if (slider) slider.disabled = true;
-        box.classList.add('crop-flat');
-        hint.textContent = opts.flatHint ||
-          'התמונה בדיוק בצורת המסגרת — אין מה להזיז.';
-        return;
-      }
-      if (slider && slack.y <= 1) {
-        slider.disabled = true;
-        hint.textContent = 'התמונה רחבה מהמסגרת ונחתכת לרוחב — אין מה להזיז לאורך.';
-      }
+      var scale = Math.max(boxSize.w / iw, boxSize.h / ih);
+      slack.x = iw * scale - boxSize.w;
+      slack.y = ih * scale - boxSize.h;
+      loaded = true;
+      refresh();
     });
 
     if (slider) {
@@ -632,49 +704,103 @@
       });
     }
 
+    /* הגדלה סביב הנקודה שנבחרה, ולכן `pos` אינו זז איתה — מה שהיה
+       במרכז המסגרת נשאר במרכז המסגרת. */
+    if (zoomI) {
+      zoomI.addEventListener('input', function () {
+        zoom = clampZ(Number(zoomI.value) / 100);
+        refresh();
+      });
+    }
+
     /* גרירה: האצבע מזיזה את **התמונה**. משיכה למעלה חושפת את מה שמתחת,
-       כלומר מגדילה את האחוז. זו המוסכמה בכל בורר תמונה. */
-    var dragging = false, last = null;
+       כלומר מגדילה את האחוז. זו המוסכמה בכל בורר תמונה.
+
+       בהגדלה z התמונה זזה על המסך פי z לכל אחוז, ולכן החלוקה היא בסרך
+       המוגדל. בלי זה הגרירה הייתה מאיצה ככל שמגדילים ומאבדת את האצבע. */
+    var pointers = {}, count = 0;
+    var last = null, pinch = null;
 
     function move(dx, dy) {
-      if (slack.x > 1) pos.x = clamp(pos.x - (dx / slack.x) * 100, pos.x);
-      if (slack.y > 1) pos.y = clamp(pos.y - (dy / slack.y) * 100, pos.y);
+      var sx = slackAt('x'), sy = slackAt('y');
+      if (sx > 1) pos.x = clamp(pos.x - (dx / sx) * 100, pos.x);
+      if (sy > 1) pos.y = clamp(pos.y - (dy / sy) * 100, pos.y);
       paint();
     }
 
+    function two() {
+      var ids = Object.keys(pointers);
+      return ids.length >= 2 ? [pointers[ids[0]], pointers[ids[1]]] : null;
+    }
+    function spread(p) {
+      return Math.sqrt(Math.pow(p[0].x - p[1].x, 2) + Math.pow(p[0].y - p[1].y, 2));
+    }
+
     box.addEventListener('pointerdown', function (e) {
-      if (slack.x <= 1 && slack.y <= 1) return;
-      dragging = true;
-      last = { x: e.clientX, y: e.clientY };
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      count++;
       box.classList.add('crop-drag');
       try { box.setPointerCapture(e.pointerId); } catch (err) { /* לא חוסם */ }
+      var p = two();
+      if (p) { pinch = { d: spread(p) || 1, z: zoom }; last = null; }
+      else { last = { x: e.clientX, y: e.clientY }; }
     });
 
     box.addEventListener('pointermove', function (e) {
-      if (!dragging) return;
+      if (!pointers[e.pointerId]) return;
       e.preventDefault();
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+
+      var p = two();
+      if (pinch && p) {
+        zoom = clampZ(pinch.z * (spread(p) / pinch.d));
+        refresh();
+        return;
+      }
+      if (!last) return;
       move(e.clientX - last.x, e.clientY - last.y);
       last = { x: e.clientX, y: e.clientY };
     });
 
-    function stop() {
-      if (!dragging) return;
-      dragging = false;
-      box.classList.remove('crop-drag');
+    function release(e) {
+      if (!pointers[e.pointerId]) return;
+      delete pointers[e.pointerId];
+      count = Math.max(0, count - 1);
+      if (count < 2) pinch = null;
+      if (count === 0) { last = null; box.classList.remove('crop-drag'); }
+      else {
+        /* האצבע שנשארה ממשיכה לגרור מהמקום שבו היא נמצאת עכשיו, ולא
+           מהמקום שבו הצביטה התחילה — אחרת התמונה קופצת בשחרור. */
+        var ids = Object.keys(pointers);
+        last = { x: pointers[ids[0]].x, y: pointers[ids[0]].y };
+      }
     }
-    box.addEventListener('pointerup', stop);
-    box.addEventListener('pointercancel', stop);
+    box.addEventListener('pointerup', release);
+    box.addEventListener('pointercancel', release);
+
+    /* גלגלת במחשב — ההגדלה היחידה שיש לעכבר */
+    box.addEventListener('wheel', function (e) {
+      if (!zoomI) return;
+      e.preventDefault();
+      zoom = clampZ(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      refresh();
+    }, { passive: false });
 
     /* מקשי החיצים — הדרך היחידה להגיע לזה בלי עכבר או מגע, ובעיגול
-       גם הדרך היחידה להזיז לרוחב כשאין מחוון. */
-    var STEP = 4;
+       גם הדרך היחידה להזיז לרוחב כשאין מחוון. פלוס ומינוס להגדלה,
+       מאותה סיבה בדיוק. */
+    var STEP = 4, ZSTEP = 0.1;
     box.addEventListener('keydown', function (e) {
       var dx = 0, dy = 0;
       if (e.key === 'ArrowUp') dy = -STEP;
       else if (e.key === 'ArrowDown') dy = STEP;
       else if (e.key === 'ArrowLeft') dx = -STEP;
       else if (e.key === 'ArrowRight') dx = STEP;
-      else return;
+      else if (e.key === '+' || e.key === '=') {
+        e.preventDefault(); zoom = clampZ(zoom + ZSTEP); refresh(); return;
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault(); zoom = clampZ(zoom - ZSTEP); refresh(); return;
+      } else return;
       e.preventDefault();
       /* המקשים מזיזים את החלון, לא את התמונה — "למעלה" מראה מה שלמעלה */
       if (dy) pos.y = clamp(pos.y + dy, pos.y);
@@ -683,8 +809,15 @@
     });
 
     return {
-      element: U.el('div', { class: 'crop' }, [box, slider, hint]),
-      value: function () { return { x: Math.round(pos.x), y: Math.round(pos.y) }; }
+      element: U.el('div', { class: 'crop' }, [box, slider, zoomRow, hint]),
+      value: function () {
+        return {
+          x: Math.round(pos.x), y: Math.round(pos.y),
+          /* שתי ספרות מספיקות למחוון בקפיצות של 5%, והן מה שנוסע
+             בייצוא ובמיזוג — מספר ארוך שם הוא רעש. */
+          z: Math.round(zoom * 100) / 100
+        };
+      }
     };
   };
 

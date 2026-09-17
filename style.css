@@ -474,6 +474,10 @@ body.dragging .empty { border-color: var(--accent); background: var(--accent-sof
    כמלבן גבוה, והמרכז שלו הוא הספח — כלומר בדיוק החלק שאינו התעודה.
    העוגן הוויזואלי אמור להראות את מה שמזהה את המסמך. */
 .anchor { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; object-position: 50% 0; background: var(--surface-2); border: 0; cursor: pointer; }
+/* ההגדלה גולשת מעבר לגבול התמונה, ו-overflow על התמונה עצמה אינו עושה
+   דבר — לכן העוגן יושב במעטפת שחותכת. */
+.anchor-wrap { display: block; width: 100%; aspect-ratio: 16/10; overflow: hidden; background: var(--surface-2); cursor: pointer; }
+.anchor-wrap .anchor { aspect-ratio: auto; height: 100%; }
 .anchor-pdf { aspect-ratio: auto; max-height: 260px; overflow: hidden; background: var(--surface-2); }
 .anchor-pdf .pdf-page { border-radius: 0; box-shadow: none; }
 .anchor-pdf .empty { margin: 0; border: 0; }
@@ -548,6 +552,11 @@ select.f-i { appearance: none; background-image: none; }
 
 .crop-range { width: 100%; accent-color: var(--accent); }
 .crop-range:disabled { opacity: .4; }
+
+/* מחוון ההגדלה נושא תווית, מפני שבניגוד למיקום אין לו מקבילה במחווה
+   שאפשר לנחש: גרירה מובנת מאליה, צביטה על תצוגה מקדימה פחות. */
+.crop-zoom { display: flex; align-items: center; gap: 10px; }
+.crop-zoom > span { flex: none; }
 
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .sw { width: 34px; height: 34px; border-radius: var(--r-pill); border: 2px solid transparent; cursor: pointer; }

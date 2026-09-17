@@ -567,11 +567,14 @@
         } else {
           var url = URL.createObjectURL(rec.data);
           var img = U.el('img', { class: 'anchor', src: url, alt: 'צילום המסמך' });
-          /* המסגרת שהמשתמש בחר בעריכה. ברירת המחדל היא ראש התמונה. */
-          img.style.objectPosition = '50% ' + (Number(first.focusY) || 0) + '%';
-          img.addEventListener('click', function () { UI.viewer(rec, first.name); });
+          /* המסגרת שהמשתמש בחר בעריכה — מיקום והגדלה. ברירת המחדל היא
+             ראש התמונה בלי הגדלה, וזה בדיוק מה שמסמך ישן כבר נראה. */
+          UI.applyFocus(img, { x: first.focusX, y: first.focusY, z: first.focusZ },
+            { x: 50, y: 0 });
           img.addEventListener('load', function () { URL.revokeObjectURL(url); });
-          headCard.insertBefore(img, headCard.firstChild);
+          var anchorWrap = U.el('span', { class: 'anchor-wrap' }, img);
+          anchorWrap.addEventListener('click', function () { UI.viewer(rec, first.name); });
+          headCard.insertBefore(anchorWrap, headCard.firstChild);
         }
       });
     } else {
@@ -858,11 +861,14 @@
 
       blobP.then(function (blob) {
         if (!blob) return;
-        cropCtl = UI.cropper(blob, { x: 50, y: cropFile.focusY }, {
-          defaultFocus: { x: 50, y: 0 },
-          label: 'מיקום התצוגה המקדימה',
-          hint: 'גרור את התצוגה למעלה ולמטה'
-        });
+        cropCtl = UI.cropper(blob,
+          { x: cropFile.focusX, y: cropFile.focusY, z: cropFile.focusZ }, {
+            defaultFocus: { x: 50, y: 0 },
+            label: 'מיקום התצוגה המקדימה',
+            /* ברגע שיש הגדלה, גם הציר הרוחבי חי — ולכן הרמז אינו
+               מבטיח יותר "למעלה ולמטה" בלבד. */
+            hint: 'גרור כדי לבחור מה יוצג, וצבוט או הגדל במחוון'
+          });
         U.clear(cropHost);
         cropHost.appendChild(U.el('div', { class: 'files-h', text: 'תצוגה מקדימה' }));
         cropHost.appendChild(cropCtl.element);
@@ -966,7 +972,12 @@
 
       /* המסגרת נשמרת על הקובץ שמצויר בעוגן, ולא על המסמך — החלפת הקובץ
          מחליפה גם את המסגרת שלו, וזה הדבר הנכון. */
-      if (cropCtl && r.value.files.length) r.value.files[0].focusY = cropCtl.value().y;
+      if (cropCtl && r.value.files.length) {
+        var frame = cropCtl.value();
+        r.value.files[0].focusX = frame.x;
+        r.value.files[0].focusY = frame.y;
+        r.value.files[0].focusZ = frame.z;
+      }
 
       /* ---------- זיהוי מסמך מעודכן ----------
          אותו סוג, אותה ישות, אותם שדות חובה — אותו מסמך. מה שקובע מי

@@ -59,7 +59,7 @@
        והעיגול הוא חלון לתוכה שאפשר לגרור. חיתוך מהמרכז בזמן הבחירה
        היה מקבע ניחוש שאי אפשר לתקן בלי הקובץ המקורי. */
     var avatarImage = e.avatarImage || '';
-    var avatarFocus = e.avatarFocus || { x: 50, y: 50 };
+    var avatarFocus = e.avatarFocus || { x: 50, y: 50, z: 1 };
     var framer = null;
 
     var host = U.el('div', { class: 'av-host' });
@@ -83,7 +83,7 @@
         framer = window.UI.cropper(avatarImage, avatarFocus, {
           shape: 'circle', slider: false,
           label: 'מה יוצג בעיגול האווטאר',
-          hint: 'גרור כדי לבחור מה יוצג בעיגול',
+          hint: 'גרור כדי לבחור מה יוצג, וצבוט כדי להגדיל',
           flatHint: 'התמונה ריבועית — כולה נכנסת לעיגול.'
         });
         host.appendChild(framer.element);
@@ -107,14 +107,14 @@
         avatarImage = url;
         /* תמונה חדשה מתחילה במרכז. שמירת המסגרת הקודמת הייתה מציגה
            פינה אקראית של תמונה אחרת לגמרי. */
-        avatarFocus = { x: 50, y: 50 };
+        avatarFocus = { x: 50, y: 50, z: 1 };
         paintAvatar();
       }, function (err) { avErr.textContent = err.message; });
     });
     pickB.addEventListener('click', function () { pickI.click(); });
     removeB.addEventListener('click', function () {
       avatarImage = '';
-      avatarFocus = { x: 50, y: 50 };
+      avatarFocus = { x: 50, y: 50, z: 1 };
       paintAvatar();
     });
 
