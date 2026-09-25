@@ -41,3 +41,9 @@ npm i playwright                # פעם אחת, בשורש
 python3 -m http.server 8777
 node tests/<suite>.mjs          # units · e2e · mrz · confirm · gemini · sync · drive · pwa
 ```
+
+## מוקאפים
+
+- מוקאפ = עמוד HTML רגיל שמפורסם בכלי Artifact (file_path לקובץ HTML), והקישור נמסר בצ'אט.
+- אסור להשתמש ב-Artifact type של Design/קנבס (quickstart עם intent "design", או type_url): הוא נפתח כקנבס בזום זעיר ו-Read-only, ולא נוח בנייד.
+- העמוד נגלל כרגיל וקריא בטלפון בלי זום. המסכים זה לצד זה ויורדים לשורה חדשה במסך צר. כל מסך ברוחב טלפון (~300px), עם כותרת קצרה מעליו והסבר קצר מתחתיו.
