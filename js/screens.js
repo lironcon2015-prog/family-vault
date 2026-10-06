@@ -775,6 +775,8 @@
     function refresh(manual) {
       if (ui.busy || !L.ready()) return;
       ui.busy = true;
+      /* תקלה מהניסיון הקודם אינה מצב הניסיון הזה */
+      ui.err = '';
       paint();
       L.refresh(src.key).then(function (r) {
         ui.busy = false; ui.err = '';

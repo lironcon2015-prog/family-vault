@@ -140,12 +140,19 @@ t('קובץ מחוץ לתיקיית המסמכים נדחה', !outside.ok && /Ho
 const inside = post({ token: SECRET, action: 'linkDownload', source: 'homebudget', fileId: fV7 });
 t('קובץ בתוך התיקייה יורד', inside.ok && inside.result.data === PNG);
 t('בלי הסוד — כלום', !post({ token: 'x', action: 'linkManifest', source: 'homebudget' }).ok);
+const mod = man.result.modified;
+const same = post({ token: SECRET, action: 'linkManifest', source: 'homebudget', since: mod });
+t('גיבוי שלא השתנה — הגשר לא קורא אותו', same.ok && same.result.unchanged === true && !same.result.docs);
+const stale = post({ token: SECRET, action: 'linkManifest', source: 'homebudget', since: mod - 1 });
+t('חותמת ישנה — רשימה מלאה', stale.ok && !stale.result.unchanged && stale.result.docs.length === 6);
 t('אין פעולת מחיקה גם עכשיו', /פעולה לא מוכרת/.test(post({ token: SECRET, action: 'delete', fileId: fV7 }).error));
 
 /* ---------- הדפדפן ---------- */
 const URL_EXEC = 'https://script.google.com/macros/s/FAKE/exec';
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
 let oldBridge = false;
+let fail404 = 0;
+const sinceLog = [];
 const calls = [];
 
 async function device(name) {
@@ -153,6 +160,11 @@ async function device(name) {
   await ctx.route('https://script.google.com/**', async route => {
     const body = JSON.parse(route.request().postData() || '{}');
     calls.push(name + ':' + body.action);
+    if (body.action === 'linkManifest') sinceLog.push(body.since || 0);
+    if (fail404 && body.action === 'linkManifest') {
+      fail404--;
+      return route.fulfill({ status: 404, contentType: 'text/html', body: '<html>Sorry, unable to open the file</html>' });
+    }
     if (oldBridge && /^link/.test(body.action)) {
       return route.fulfill({ status: 200, contentType: 'application/json',
         body: JSON.stringify({ ok: false, error: 'פעולה לא מוכרת: ' + body.action }) });
@@ -335,6 +347,27 @@ t('"שמור עותק" — הפעם היחידה שקובץ מועלה', count('
 await p.evaluate(() => window.App.render());
 await p.waitForSelector('.lmirror');
 t('ואז ההכרזה נעלמת', (await p.locator('.lorphan').count()) === 0);
+
+console.log('\n— רענון זול, וניסיון חוזר —');
+const reads = sinceLog.length;
+await p.click('.mirror-h button');
+await p.waitForFunction(n => !document.querySelector('.mirror-h.spin'), reads);
+t('רענון שני שולח את חותמת הזמן של מה שיש', sinceLog.length === reads + 1 && sinceLog[reads] > 0, JSON.stringify(sinceLog));
+t('ו"לא השתנה" משאיר את הרשימה כמו שהיא', (await p.locator('.lgrp').count()) > 0 && (await p.locator('.lmirror .notice-warn').count()) === 0);
+await p.evaluate(() => { window.Linked.RETRY_MS = 50; });
+fail404 = 1;
+await p.click('.mirror-h button');
+await p.waitForFunction(() => !document.querySelector('.mirror-h.spin'));
+t('404 רגעי — ניסיון נוסף, ושום שגיאה על המסך', fail404 === 0 && (await p.locator('.lmirror .notice-warn').count()) === 0);
+fail404 = 2;
+await p.click('.mirror-h button');
+await p.waitForSelector('.lmirror .notice-warn');
+const msg404 = await p.textContent('.lmirror .notice-warn');
+t('404 שחוזר — ההודעה אומרת מה לבדוק', /הפריסה הפעילה/.test(msg404), msg404);
+fail404 = 0;
+await p.click('.mirror-h button');
+await p.waitForFunction(() => !document.querySelector('.mirror-h.spin'));
+t('ההודעה הישנה נעלמת ברגע שמתחיל ניסיון חדש שמצליח', (await p.locator('.lmirror .notice-warn').count()) === 0);
 
 console.log('\n— כשאין דרך לקרוא —');
 oldBridge = true;

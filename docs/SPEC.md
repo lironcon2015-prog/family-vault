@@ -1291,7 +1291,11 @@ Chat.context + Chat.prompt  →  Gemini.chat  →  Chat.compile  →  אישור
 title · docs[ id title name mime size cat date amount summary text(≤1200) fileId payment created ] · cats[ id label ] · exported · modified
 ```
 
-`payment` הוא מספר התשלום, שנגזר מ-`linkedPaymentId` מול `propertyPayments`. הורדה מותרת רק לקובץ שאחד מההורים שלו הוא תיקיית המסמכים של המקור.
+`payment` הוא מספר התשלום, שנגזר מ-`linkedPaymentId` מול `propertyPayments`.
+
+**רענון זול.** הדפדפן שולח `since` — ה-`modified` של הרשימה שכבר יש לו. גיבוי שלא השתנה מאז עונה `{ unchanged: true }` בלי לקרוא את הקובץ, כי הקריאה והפרסור של גיבוי עם כל העסקאות הם החלק היקר. `since` נשלח רק כשהקאש נבנה באותה גרסה של האפליקציה (`ver`), כי טבלת הקטגוריות יכולה להשתנות בין גרסאות. `linkManifest` רץ בתקרת הזמן הארוכה (`NET_BLOB_TIMEOUT_MS`).
+
+**ניסיון חוזר אחד** על תקלה שחולפת: 404 (גוגל בזמן פריסה), 5xx, "לא ענה בזמן" ו"אין חיבור". 404 שחוזר מתורגם להודעה שמפנה לפריסה הפעילה. תקלה מהניסיון הקודם נמחקת מהמסך ברגע שמתחיל ניסיון חדש. הורדה מותרת רק לקובץ שאחד מההורים שלו הוא תיקיית המסמכים של המקור.
 
 ### 18.3 מסכים
 

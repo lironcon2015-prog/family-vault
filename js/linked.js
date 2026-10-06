@@ -221,16 +221,31 @@
 
   /* קריאה מהמקור. מחזירה גם מה נוסף ומה נעלם מאז הקריאה הקודמת, כדי
      שהמסך יכריז על השינוי פעם אחת ולא ישנה רשימה בשקט. */
+  /* תקלה שחולפת מעצמה: 404 בזמן פריסה, גשר שהתעורר לאט, רשת שנפלה לרגע.
+     ניסיון אחד נוסף מעלים את רובן לפני שהן מגיעות למסך. */
+  var TRANSIENT = /לא ענה בזמן|\(404\)|\(5\d\d\)|אין חיבור לגשר/;
+  L.RETRY_MS = 1500;
+
+  function withRetry(fn) {
+    return fn().catch(function (e) {
+      if (!TRANSIENT.test((e && e.message) || '')) throw e;
+      return new Promise(function (res) { setTimeout(res, L.RETRY_MS); }).then(fn);
+    });
+  }
+
   L.refresh = function (key) {
     var src = L.source(key);
     if (!src) return Promise.reject(new Error('מקור לא מוכר'));
     if (!L.ready()) return Promise.reject(new Error(L.whyNot()));
-    return transport().linkManifest(key).then(function (raw) {
+    var prev = L.cached(key);
+    /* "לא השתנה" תקף רק לרשימה שנורמלה באותה גרסה של האפליקציה — טבלת
+       הקטגוריות יכולה להשתנות בין גרסאות, והקאש נבנה לפיה. */
+    var since = prev && prev.ver === C.VERSION && prev.manifest ? prev.manifest.modified : 0;
+    return withRetry(function () { return transport().linkManifest(key, since); }).then(function (raw) {
       if (!raw || raw.found === false) {
         throw new Error('לא נמצא גיבוי של ' + src.app + ' בדרייב. ודא שהסנכרון לדרייב פעיל שם.');
       }
-      var manifest = L.normalize(src, raw);
-      var prev = L.cached(key);
+      var manifest = raw.unchanged && since ? prev.manifest : L.normalize(src, raw);
       var before = {}, now = {};
       ((prev && prev.manifest && prev.manifest.docs) || []).forEach(function (d) { before[d.id] = 1; });
       manifest.docs.forEach(function (d) { now[d.id] = 1; });
@@ -240,9 +255,9 @@
       var all = cacheAll();
       var next = {};
       Object.keys(all).forEach(function (k) { next[k] = all[k]; });
-      next[key] = { at: U.now(), manifest: manifest };
+      next[key] = { at: U.now(), ver: C.VERSION, manifest: manifest };
       return S.set(C.K.linkCache, next).then(function () {
-        return { manifest: manifest, added: added, removed: removed, first: !prev };
+        return { manifest: manifest, added: added, removed: removed, first: !prev, unchanged: !!raw.unchanged };
       });
     });
   };

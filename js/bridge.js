@@ -40,11 +40,21 @@
     var body = { token: secret(), action: action };
     Object.keys(params || {}).forEach(function (k) { body[k] = params[k]; });
 
-    var slow = action === 'upload' || action === 'download' || action === 'linkDownload';
+    /* `linkManifest` איטי בגלל הצד של גוגל ולא בגלל הרשת: הגשר קורא ומפרסר
+       את כל הגיבוי של התקציב. 30 שניות לא הספיקו בסלולר. */
+    var slow = action === 'upload' || action === 'download' ||
+               action === 'linkDownload' || action === 'linkManifest';
     return window.U.fetchT(url(), { method: 'POST', body: JSON.stringify(body) },
       slow ? C.NET_BLOB_TIMEOUT_MS : C.NET_TIMEOUT_MS,
       'הגשר לא ענה בזמן — בדוק את הכתובת ואת הרשת')
       .then(function (r) {
+        /* 404 אינו תשובה של הגשר — הגשר עונה 200 גם על סוד שגוי. זו גוגל
+           שלא מצאה פריסה פעילה בכתובת: רגעית בזמן פריסה, או קבועה אם
+           הכתובת שייכת לפריסה שהועברה לארכיון. */
+        if (r.status === 404) {
+          throw new Error('גוגל לא מצאה את הגשר בכתובת הזו (404). אם פרסת עכשיו גרסה חדשה — ' +
+            'נסה שוב בעוד רגע. אחרת ודא שהכתובת בהגדרות היא של הפריסה הפעילה.');
+        }
         if (!r.ok) throw new Error('הגשר החזיר שגיאה (' + r.status + ')');
         return r.text();
       }, function (e) {
@@ -144,8 +154,8 @@
 
   B.canLink = true;
 
-  B.linkManifest = function (source) {
-    return linkCall('linkManifest', { source: source });
+  B.linkManifest = function (source, since) {
+    return linkCall('linkManifest', { source: source, since: since || 0 });
   };
 
   B.linkDownload = function (source, fileId) {

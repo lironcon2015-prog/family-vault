@@ -261,6 +261,13 @@ function _linkManifest(req) {
   var src = _source(req);
   var f = _latestByName(src.backup);
   if (!f) return { found: false };
+  /* הגיבוי של התקציב מחזיק את כל העסקאות, ולקרוא ולפרסר אותו זה החלק
+     היקר — מספיק כדי לחרוג מתקרת הזמן ברשת סלולרית. הדפדפן שולח את
+     חותמת הזמן של מה שכבר יש לו, ואם הקובץ לא השתנה מאז, לא קוראים כלום. */
+  var modified = f.getLastUpdated().getTime();
+  if (req.since && Number(req.since) === modified) {
+    return { found: true, unchanged: true, modified: modified };
+  }
   var data = JSON.parse(f.getBlob().getDataAsString('UTF-8'));
 
   var payNo = {};
@@ -289,7 +296,7 @@ function _linkManifest(req) {
     title: _str((data.property && data.property.name) || '', 80),
     docs: docs, cats: cats,
     exported: _str(data.exportedAt, 30),
-    modified: f.getLastUpdated().getTime()
+    modified: modified
   };
 }
 
