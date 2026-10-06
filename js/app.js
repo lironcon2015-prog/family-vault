@@ -42,6 +42,7 @@
   App.entityContext = function () {
     var parts = parse();
     if (parts[0] === 'entity' && parts[1]) return parts[1];
+    if (parts[0] === 'linked' && parts[1]) return parts[1];
     if (parts[0] === 'doc' && parts[1] === 'new') return App.pendingEntityId;
     return null;
   };
@@ -113,6 +114,7 @@
       case 'entity':   return Screens.entity(parts[1]);
       case 'settings': return Screens.settings();
       case 'chat':     return Screens.chat();
+      case 'linked':   return Screens.linkedDoc(parts[1], decodeURIComponent(parts[2] || ''));
       case 'doc':
         if (parts[1] === 'new') return Screens.docForm(null);
         if (parts[2] === 'edit') return Screens.docForm(parts[1]);
@@ -154,7 +156,7 @@
   function paintNav(parts) {
     var active = '#/' + (parts[0] || C.HOME);
     /* מסך פנימי משאיר את הלשון הראשית מודגשת */
-    if (['entity', 'doc', 'chat'].indexOf(parts[0]) !== -1) active = '#/entities';
+    if (['entity', 'doc', 'chat', 'linked'].indexOf(parts[0]) !== -1) active = '#/entities';
     nav.querySelectorAll('.nav-i').forEach(function (b) {
       b.classList.toggle('on', b.dataset.hash === active);
     });

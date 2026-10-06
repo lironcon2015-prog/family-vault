@@ -40,7 +40,7 @@
     var body = { token: secret(), action: action };
     Object.keys(params || {}).forEach(function (k) { body[k] = params[k]; });
 
-    var slow = action === 'upload' || action === 'download';
+    var slow = action === 'upload' || action === 'download' || action === 'linkDownload';
     return window.U.fetchT(url(), { method: 'POST', body: JSON.stringify(body) },
       slow ? C.NET_BLOB_TIMEOUT_MS : C.NET_TIMEOUT_MS,
       'הגשר לא ענה בזמן — בדוק את הכתובת ואת הרשת')
@@ -122,6 +122,34 @@
 
   B.downloadBlob = function (fileId) {
     return B.call('download', { fileId: fileId }).then(function (r) {
+      return fromB64(r && r.data, r && r.mime);
+    });
+  };
+
+  /* ---------- מסמכים מקושרים — DEC-47 ----------
+     קריאה בלבד. הדפדפן שולח מפתח מקור, ושמות הקבצים בדרייב יושבים בגשר.
+     רק התחבורה הזו מממשת את שתי הפעולות: `drive.file` של OAuth רואה רק
+     קבצים שהכספת עצמה יצרה, ולכן הוא אינו יכול לקרוא את קבצי התקציב. */
+
+  /* גשר שנפרס לפני DEC-47 עונה "פעולה לא מוכרת". זה לא באג אצל המשתמש —
+     זו פריסה ישנה, וההודעה אומרת מה לעשות. */
+  function linkCall(action, params) {
+    return B.call(action, params).catch(function (e) {
+      if (/פעולה לא מוכרת/.test((e && e.message) || '')) {
+        throw new Error('הגשר צריך עדכון — הדבק את bridge.gs החדש ופרוס גרסה חדשה');
+      }
+      throw e;
+    });
+  }
+
+  B.canLink = true;
+
+  B.linkManifest = function (source) {
+    return linkCall('linkManifest', { source: source });
+  };
+
+  B.linkDownload = function (source, fileId) {
+    return linkCall('linkDownload', { source: source, fileId: fileId }).then(function (r) {
       return fromB64(r && r.data, r && r.mime);
     });
   };

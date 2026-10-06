@@ -818,3 +818,66 @@ body.locked .syncdot { display: none; }
 }
 .chat-in { flex: 1; min-height: 48px; }
 .chat-bar .btn { margin-top: 0; flex: none; padding: 13px 18px; }
+
+/* ============ מסמכים מקושרים — DEC-47 ============
+   בלי גוון חדש: "מגיע ממקור אחר" נאמר באייקון ובמילה, ולא בצבע רביעי
+   שיתחרה בקשת התפוגה. האקסנט נשמר למה שהכספת עצמה אחראית עליו. */
+.atile-link {
+  position: absolute; bottom: 8px; inset-inline-start: 10px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 700; padding: 3px 8px 3px 7px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, .74); color: var(--ink-2);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.mirror-h {
+  display: flex; align-items: center; gap: 8px; margin: -4px 2px 4px;
+  font-size: 12.5px; color: var(--ink-2);
+}
+.mirror-h > span { flex: 1; min-width: 0; }
+.mirror-h .iconbtn { width: 34px; height: 34px; }
+.mirror-h.spin .iconbtn .ic { animation: lspin 900ms linear infinite; }
+@keyframes lspin { to { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) { .mirror-h.spin .iconbtn .ic { animation: none; } }
+.lsec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.lsec-h em { font-style: normal; color: var(--ink-3); font-size: 12px; }
+.lbox { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: hidden; }
+.lbox + .lbox { margin-top: 10px; }
+.lrow {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 11px 14px; background: transparent; border: 0; border-top: 1px solid var(--line);
+  text-align: start; font: inherit; color: inherit; cursor: pointer;
+}
+.lrow:first-child { border-top: 0; }
+.lrow:active { background: var(--surface-2); }
+.lrow .card-ic { width: 34px; height: 34px; }
+.lrow .card-t { font-size: 14px; }
+.lrow .card-s { font-size: 12px; color: var(--ink-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow.ldoc { background: var(--surface-2); padding-inline-start: 22px; }
+.lrow.ldoc:active { background: var(--line); }
+.lgrp .ic-chev { color: var(--ink-3); transition: transform var(--dur-base) var(--ease); }
+.lgrp[aria-expanded="true"] .ic-chev { transform: rotate(180deg); }
+.lcnt {
+  flex: none; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: var(--r-pill); padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.lamt { flex: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lsnip { font-size: 12px; color: var(--ink-2); margin-top: 3px; line-height: 1.4; white-space: normal; }
+.lsnip mark { background: var(--exp-d90-bg); color: var(--ink); border-radius: 3px; padding: 0 2px; }
+.chip.lin { background: var(--accent-soft); color: var(--accent-strong); }
+.chip.lsrc { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); color: var(--ink-2); }
+.lempty { padding: 14px; font-size: 13px; color: var(--ink-2); }
+.lpick { display: flex; flex-direction: column; gap: 8px; }
+.lpick .card { padding: 12px 14px; }
+.lpick .card + .card { margin-top: 0; }
+.lpick .card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow); }
+.lfacts { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); margin: 4px 0 12px; }
+.lfacts div { display: flex; gap: 8px; align-items: flex-start; }
+.lfacts .ic { flex: none; color: var(--accent); margin-top: 1px; }
+.lacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.lacts .btn { width: 100%; }
+a.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+.lacts .btn { margin-top: 0; padding-inline: 12px; }
+.lorphan { margin: 10px 0 8px; }
+.lorphan + .lacts { margin: 0 0 12px; }
+.lset-btn { flex: none; white-space: nowrap; margin-top: 0; padding: 8px 16px; }

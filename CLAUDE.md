@@ -39,7 +39,7 @@
 ```bash
 npm i playwright                # פעם אחת, בשורש
 python3 -m http.server 8777
-node tests/<suite>.mjs          # units · e2e · mrz · confirm · gemini · sync · drive · pwa
+node tests/<suite>.mjs          # units · e2e · mrz · confirm · gemini · sync · drive · pwa · bridge · keyfile · features · link
 ```
 
 ## מוקאפים

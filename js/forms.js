@@ -153,6 +153,9 @@
             avatarImage: avatarImage || '',
             avatarFocus: readFocus(),
             sortOrder: e.sortOrder != null ? e.sortOrder : Date.now(),
+            /* הקישור למקור (DEC-47) אינו שדה בטופס, ולכן הוא חייב לשרוד
+               עריכה במפורש — אחרת שינוי שם היה מנתק את המראה בשקט. */
+            link: e.link || null,
             deleted: 0
           }
         };

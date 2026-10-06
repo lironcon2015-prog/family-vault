@@ -13,6 +13,12 @@
  *      ומחוצה לה הגשר מסרב. זה מצמצם את הנזק מדליפת הסוד מ"כל הדרייב"
  *      ל"התיקייה של האפליקציה".
  *   2. **אין יצירת קבצים מחוץ לתיקייה**, ואין מחיקה בכלל.
+ *   3. **מסמכים מקושרים (DEC-47) — קריאה בלבד, ממקור שמוגדר כאן.** הכספת
+ *      יכולה להציג מסמכים שאפליקציה אחרת כבר העלתה (התקציב), בלי להעלות
+ *      אותם שוב. שמות הקבצים בדרייב יושבים ב-`SOURCES` למטה ולא מגיעים
+ *      מהדפדפן: הדפדפן שולח מפתח מקור בלבד. מקובץ הגיבוי של המקור יוצאת
+ *      **רק** רשימת המסמכים — לא עסקאות, לא חשבונות ולא שום מפתח אחר —
+ *      והורדה מאומתת מול תיקיית המסמכים של המקור.
  *
  * ⚠️ הכתובת והסוד הם **צמד גישה**. מי שמחזיק את שניהם יכול לקרוא ולכתוב
  *    בתיקיית DocVault שלך. אל תשלח אותם בערוץ פתוח, ואם דלפו — פרוס מחדש
@@ -56,6 +62,14 @@ var DB_NAME = 'docvault-db.json';
 var MARKER = 'family-vault-root';
 var MIN_SECRET = 16;
 
+/* מקורות של מסמכים מקושרים. מקור נוסף הוא שורה כאן ושורה ב-
+   CONFIG.LINK_SOURCES. `backup` הוא קובץ הגיבוי שבו יושבת רשימת המסמכים,
+   `folder` היא התיקייה שבה יושבים הקבצים עצמם. */
+var SOURCES = {
+  homebudget: { backup: 'finance-app-backup.json', folder: 'HomeBudget מסמכים' }
+};
+var LINK_TEXT_MAX = 1200;
+
 /* ---------- הכניסה ---------- */
 
 function doPost(e) {
@@ -82,6 +96,8 @@ function _handle(req) {
     case 'putDb':    return _putDb(req);
     case 'upload':   return _upload(req);
     case 'download': return _download(req);
+    case 'linkManifest': return _linkManifest(req);
+    case 'linkDownload': return _linkDownload(req);
     default: throw new Error('פעולה לא מוכרת: ' + req.action);
   }
 }
@@ -175,6 +191,93 @@ function _upload(req) {
 function _download(req) {
   var file = DriveApp.getFileById(String(req.fileId || ''));
   if (!_inVault(file)) throw new Error('הקובץ אינו בתיקיית DocVault');
+  var blob = file.getBlob();
+  return {
+    name: file.getName(),
+    mime: blob.getContentType(),
+    data: Utilities.base64Encode(blob.getBytes())
+  };
+}
+
+/* ---------- מסמכים מקושרים — קריאה בלבד ---------- */
+
+function _source(req) {
+  var src = SOURCES[String(req.source || '')];
+  if (!src) throw new Error('מקור לא מוכר: ' + req.source);
+  return src;
+}
+
+/* הגיבוי העדכני ביותר. אפליקציה שמגבה לדרייב עלולה להשאיר שני עותקים
+   (מכשיר שני שיצר קובץ לפני שמצא את הראשון), והעדכני הוא האמת שלה. */
+function _latestByName(name) {
+  var it = DriveApp.getFilesByName(name), best = null;
+  while (it.hasNext()) {
+    var f = it.next();
+    if (f.isTrashed()) continue;
+    if (!best || f.getLastUpdated().getTime() > best.getLastUpdated().getTime()) best = f;
+  }
+  return best;
+}
+
+function _str(v, max) {
+  var s = v == null ? '' : String(v);
+  return max && s.length > max ? s.slice(0, max) : s;
+}
+
+/* ההטלה היא כל ההגנה על שאר הקובץ: מה שאינו נכתב כאן אינו עוזב את גוגל.
+   קובץ הגיבוי של התקציב מחזיק את כל העסקאות; לכספת מגיעה רשימת המסמכים. */
+function _linkManifest(req) {
+  var src = _source(req);
+  var f = _latestByName(src.backup);
+  if (!f) return { found: false };
+  var data = JSON.parse(f.getBlob().getDataAsString('UTF-8'));
+
+  var payNo = {};
+  (data.propertyPayments || []).forEach(function (p) {
+    if (p && p.id) payNo[p.id] = p.paymentNumber || null;
+  });
+
+  var docs = (data.propertyDocs || []).filter(function (d) { return d && d.id; })
+    .map(function (d) {
+      return {
+        id: _str(d.id), title: _str(d.title || d.name, 200), name: _str(d.name, 200),
+        mime: _str(d.mime, 100), size: Number(d.size) || 0,
+        cat: _str(d.docType), date: _str(d.docDate, 10),
+        amount: Number(d.amount) || 0, summary: _str(d.summary, 400),
+        text: _str(d.text, LINK_TEXT_MAX), fileId: _str(d.driveFileId),
+        payment: d.linkedPaymentId ? (payNo[d.linkedPaymentId] || null) : null,
+        created: _str(d.createdAt, 30)
+      };
+    });
+
+  var cats = (data.propertyDocCats || []).filter(function (c) { return c && c.id; })
+    .map(function (c) { return { id: _str(c.id), label: _str(c.label, 60) }; });
+
+  return {
+    found: true,
+    title: _str((data.property && data.property.name) || '', 80),
+    docs: docs, cats: cats,
+    exported: _str(data.exportedAt, 30),
+    modified: f.getLastUpdated().getTime()
+  };
+}
+
+/* קובץ של מקור נקרא רק אם הוא יושב בתיקיית המסמכים של אותו מקור. */
+function _inSource(file, src) {
+  var parents = file.getParents();
+  while (parents.hasNext()) {
+    var p = parents.next();
+    if (!p.isTrashed() && p.getName() === src.folder) return true;
+  }
+  return false;
+}
+
+function _linkDownload(req) {
+  var src = _source(req);
+  var file = DriveApp.getFileById(String(req.fileId || ''));
+  if (file.isTrashed() || !_inSource(file, src)) {
+    throw new Error('הקובץ אינו בתיקיית ' + src.folder);
+  }
   var blob = file.getBlob();
   return {
     name: file.getName(),

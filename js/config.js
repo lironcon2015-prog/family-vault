@@ -97,7 +97,8 @@
       lastSync: 'lastSync',
       recentFields: 'recentFields',
       lastNoticeDay: 'lastNoticeDay',
-      lastNoticeSig: 'lastNoticeSig'
+      lastNoticeSig: 'lastNoticeSig',
+      linkCache: 'linkCache'
     },
 
     /* המפתחות היחידים שממורים ל-localStorage — SPEC §3.5 */
@@ -168,4 +169,48 @@
       { key: K.geminiModels,  label: 'מפל המודלים',       type: 'list', pref: true }
     ]
   };
+
+  /* ---------- מסמכים מקושרים מאפליקציה אחרת — DEC-47 ----------
+     ישות יכולה להיות **מראה** של מסמכים שאפליקציה אחרת כבר העלתה לדרייב.
+     שום קובץ לא מועלה שוב: הרשימה נקראת מקובץ הגיבוי של האפליקציה ההיא,
+     והקובץ עצמו יורד רק כשנוגעים בו. מקור נוסף הוא שורה כאן, ושורה מקבילה
+     ב-`SOURCES` של `tools/bridge.gs` — שם, ולא כאן, יושבים שמות הקבצים
+     בדרייב, כדי שהסוד לא יהיה מפתח לקריאת קובץ לפי שם שהדפדפן בחר.
+
+     `cats` הן הקטגוריות המובנות של המקור, בסדר שלו. קטגוריה שהמשתמש
+     הוסיף שם מגיעה מהקובץ עצמו ומוצגת אחריהן, עם `fallbackIcon`.
+     מסמך שהקטגוריה שלו נמחקה נופל ל-`fallbackCat`, בדיוק כמו במקור.
+
+     `typeMap` הוא ההצעה הראשונה כשמוסיפים מסמך מהמראה לכספת. קטגוריה
+     שאין לה שורה כאן — כולל כל קטגוריה שהמשתמש הוסיף — פשוט שואלת. */
+  window.CONFIG.LINK_SOURCES = [
+    {
+      key: 'homebudget',
+      label: 'התקציב',
+      app: 'אפליקציית התקציב',
+      url: 'https://homebudget.lironcon.com/',
+      folder: 'HomeBudget מסמכים',
+      entityType: 'home',
+      fallbackCat: 'general',
+      fallbackIcon: 'i-folder',
+      cats: [
+        { id: 'voucher',   label: 'שובר תשלום',         icon: 'i-receipt' },
+        { id: 'receipt',   label: 'אישור ביצוע תשלום',  icon: 'i-paid' },
+        { id: 'guarantee', label: 'ערבות בנקאית',       icon: 'i-bank' },
+        { id: 'schedule',  label: 'לוח תשלומים מעודכן', icon: 'i-calendar' },
+        { id: 'mortgage',  label: 'מסמכי משכנתא',       icon: 'i-scroll' },
+        { id: 'approval',  label: 'אישור עקרוני',       icon: 'i-cert' },
+        { id: 'contract',  label: 'חוזה רכישה',         icon: 'i-sign' },
+        { id: 'tax',       label: 'מס רכישה',           icon: 'i-bank' },
+        { id: 'insurance', label: 'ביטוח',              icon: 'i-shield' },
+        { id: 'general',   label: 'מסמכים כלליים',      icon: 'i-folder' },
+        { id: 'other',     label: 'אחר',                icon: 'i-file' }
+      ],
+      typeMap: {
+        guarantee: 'sale_guarantee',
+        contract:  'purchase_contract',
+        insurance: 'home_insurance'
+      }
+    }
+  ];
 })();

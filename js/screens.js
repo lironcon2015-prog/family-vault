@@ -356,6 +356,14 @@
     var next = E.next(mine);
     var urgent = next && next.bucket !== 'ok';
     var meta = U.count(mine.length, 'מסמך אחד', 'מסמכים');
+    /* ישות שהיא מראה (DEC-47) סופרת גם את מה שהמקור מחזיק — "0 מסמכים"
+       על דירה עם ארבעים מסמכים בתקציב הוא שקר. */
+    var lsrcT = window.Linked.of(e);
+    var lcache = lsrcT && window.Linked.cached(lsrcT.key);
+    if (lcache) {
+      var ln = U.count(lcache.manifest.docs.length, 'מסמך אחד', 'מסמכים') + ' מ' + lsrcT.label;
+      meta = mine.length ? meta + ' · ' + ln : ln;
+    }
 
     var card = U.el('button', {
       class: 'card ecard ' + (layout === 'rail' ? 'ptile' : 'atile'),
@@ -379,6 +387,12 @@
     var kind = C.ENTITY_TYPES.filter(function (t) { return t.key === e.type; })[0];
     var band = U.el('span', { class: 'atile-img' }, UI.avatarImage(e));
     band.appendChild(U.el('span', { class: 'atile-k', text: kind ? kind.label : '' }));
+    var lsrc = window.Linked.of(e);
+    if (lsrc) {
+      band.appendChild(U.el('span', { class: 'atile-link' }, [
+        U.icon('i-link', 12), U.el('span', { text: lsrc.label })
+      ]));
+    }
     if (urgent) {
       band.appendChild(U.el('span', { class: 'atile-veil' }));
       band.appendChild(U.el('span', { class: 'atile-c' },
@@ -422,7 +436,8 @@
     ], '#/entities'));
 
     var all = state.docs.filter(function (d) { return d.entityId === id; });
-    if (!all.length) {
+    var lsrc = window.Linked.of(e);
+    if (!all.length && !lsrc) {
       wrap.appendChild(UI.empty({
         icon: 'i-folder',
         title: 'אין מסמכים ל' + e.name,
@@ -439,6 +454,15 @@
     /* ברירת המחדל היא האחרון שנגעו בו קודם. גרירה כותבת `sortOrder`
        לכל הרשימה, ומאז הסדר הוא של המשתמש — אותו כלל כמו בישויות. */
     mine.sort(Screens.docOrder);
+    /* ישות שהיא מראה (DEC-47) מחזיקה שני מדפים: מה שהכספת אחראית עליו,
+       ומה שהמקור מחזיק. הכותרת הזו קיימת רק כשיש שני מדפים. */
+    if (lsrc) {
+      wrap.appendChild(lsecHead('בכספת', mine.length ? String(mine.length) : ''));
+      if (!mine.length) {
+        wrap.appendChild(U.el('div', { class: 'lbox' }, U.el('div', { class: 'lempty', text:
+          'מסמך מ' + lsrc.label + ' שיש לו תפוגה או מספר שמעתיקים נוסף לכאן ב"הוסף לכספת". הקובץ לא מועלה שוב.' })));
+      }
+    }
     var dbox = U.el('div', { class: 'dgroup' });
     mine.forEach(function (doc) { dbox.appendChild(Screens.docTypeCard(doc)); });
     UI.reorder(dbox, {
@@ -470,6 +494,8 @@
       wrap.appendChild(fold);
       wrap.appendChild(list);
     }
+
+    if (lsrc) wrap.appendChild(Screens.linkMirror(e, lsrc));
 
     return wrap;
   };
@@ -517,7 +543,519 @@
     return card;
   };
 
+  /* ---------- מראה של מקור — DEC-47, SPEC §18 ----------
+     המסכים קוראים את `Linked` בלבד, ואינם מזכירים מקור, קטגוריה או סוג
+     מסמך בשם — כמו שאר המסך, הכל נגזר מהטבלאות. */
+
+  var LINK_STALE_MS = 5 * 60 * 1000;
+  /* מה פתוח ומה מחופש, לכל ישות. בזיכרון בלבד: חזרה מהמסמך מוצאת את
+     הקבוצה פתוחה, ופתיחה מחדש של האפליקציה מתחילה מקופל. */
+  var linkUi = {};
+
+  function lui(eid) {
+    if (!linkUi[eid]) linkUi[eid] = { open: {}, q: '', err: '', busy: false };
+    return linkUi[eid];
+  }
+
+  function lsecHead(text, count) {
+    return U.el('div', { class: 'sect-h lsec-h' }, [
+      U.el('span', { text: text }),
+      count ? U.el('em', { text: count }) : null
+    ]);
+  }
+
+  function ago(ts) {
+    var m = Math.round((U.now() - ts) / 60000);
+    if (m < 1) return 'עכשיו';
+    if (m < 60) return 'לפני ' + (m === 1 ? 'דקה' : m + ' דקות');
+    var h = Math.round(m / 60);
+    if (h < 24) return 'לפני ' + (h === 1 ? 'שעה' : h + ' שעות');
+    var d = Math.round(h / 24);
+    return 'לפני ' + (d === 1 ? 'יום' : d + ' ימים');
+  }
+
+  function ymd(v) { return v ? KINDS.get('date').format(v) : ''; }
+
+  /* טווח של קבוצה, בחודשים: "03/24 – 09/26". יחידה אחת היא תאריך אחד. */
+  function span(g) {
+    function mo(v) { return v.slice(5, 7) + '/' + v.slice(2, 4); }
+    if (!g.from) return '';
+    if (g.docs.length === 1) return ymd(g.from);
+    return mo(g.from) === mo(g.to) ? mo(g.from) : mo(g.from) + ' – ' + mo(g.to);
+  }
+
+  /* קטע מתוך התמלול, עם המילה מסומנת. רצפים לטיניים ומספריים נעטפים
+     ב-bdi כיחידה אחת **לפני** הסימון: "LG-77310-4" שהסימון חותך באמצע
+     היה מתפרק בכיוון ימין-לשמאל ומוצג כ-"4-LG-77310". */
+  function snipNode(snip) {
+    var text = snip.before + snip.hit + snip.after;
+    var hs = snip.before.length, he = hs + snip.hit.length;
+    var out = U.el('span', { class: 'lsnip' });
+    var re = /[A-Za-z0-9][A-Za-z0-9\-\/.:,]*[A-Za-z0-9]|[A-Za-z0-9]/g;
+    var parts = [], last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) parts.push({ s: last, e: m.index, ltr: false });
+      parts.push({ s: m.index, e: m.index + m[0].length, ltr: true });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) parts.push({ s: last, e: text.length, ltr: false });
+    parts.forEach(function (p) {
+      var host = p.ltr ? U.el('bdi', { dir: 'ltr' }) : out;
+      [[p.s, Math.min(p.e, hs), false], [Math.max(p.s, hs), Math.min(p.e, he), true],
+       [Math.max(p.s, he), p.e, false]].forEach(function (c) {
+        if (c[1] <= c[0]) return;
+        var str = text.slice(c[0], c[1]);
+        host.appendChild(c[2] ? U.el('mark', { text: str }) : document.createTextNode(str));
+      });
+      if (p.ltr) out.appendChild(host);
+    });
+    return out;
+  }
+
+  function linkDocRow(e, src, manifest, d, promoted, toks) {
+    var cat = window.Linked.cat(manifest, d.cat);
+    var sub = [ymd(d.date), d.payment != null ? 'תשלום #' + d.payment : '', toks ? cat.label : '']
+      .filter(Boolean).join(' · ');
+    var b = U.el('span', { class: 'card-b' }, [
+      U.el('span', { class: 'card-t', text: d.title }),
+      sub ? U.el('span', { class: 'card-s' }, U.bidi(sub)) : null
+    ]);
+    var snip = toks ? window.Linked.snippet(d, toks) : null;
+    if (snip) b.appendChild(snipNode(snip));
+    var row = U.el('button', { class: 'lrow ldoc', type: 'button', dataset: { id: d.id } }, [
+      U.el('span', { class: 'card-ic' }, U.icon(cat.icon, 18)),
+      b,
+      promoted ? UI.chip('lin', 'בכספת') : null,
+      d.amount ? U.el('span', { class: 'lamt' }, U.bidi(window.Linked.money(d.amount))) : null
+    ]);
+    row.addEventListener('click', function () {
+      location.hash = '#/linked/' + e.id + '/' + encodeURIComponent(d.id);
+    });
+    return row;
+  }
+
+  Screens.linkMirror = function (e, src) {
+    var L = window.Linked;
+    var ui = lui(e.id);
+    var box = U.el('div', { class: 'lmirror' });
+    var listBox = U.el('div');
+
+    function paintList(manifest) {
+      U.clear(listBox);
+      var promoted = L.promoted(src.key, state.docs);
+      var toks = L.tokens(ui.q);
+
+      if (toks.length) {
+        var hits = L.search(manifest, ui.q);
+        listBox.appendChild(U.el('p', { class: 'muted small', text: hits.length
+          ? U.count(hits.length, 'תוצאה אחת', 'תוצאות') + ' מתוך ' + manifest.docs.length + ' · כולל תוכן המסמך'
+          : 'אין התאמה. החיפוש עובר על השם, הקבוצה, התאריך, הסכום ותוכן המסמך.' }));
+        if (hits.length) {
+          var rbox = U.el('div', { class: 'lbox' });
+          hits.forEach(function (d) {
+            rbox.appendChild(linkDocRow(e, src, manifest, d, promoted[d.id], toks));
+          });
+          listBox.appendChild(rbox);
+        }
+        return;
+      }
+
+      var groups = L.groups(manifest);
+      if (!groups.length) {
+        listBox.appendChild(U.el('div', { class: 'lbox' }, U.el('div', { class: 'lempty', text:
+          'אין עדיין מסמכים ב' + src.app + '.' })));
+        return;
+      }
+      var gbox = U.el('div', { class: 'lbox' });
+      groups.forEach(function (g) {
+        var inVault = g.docs.filter(function (d) { return promoted[d.id]; }).length;
+        var sub = [span(g), inVault ? inVault + ' מתוך ' + g.docs.length + ' בכספת' : '']
+          .filter(Boolean).join(' · ');
+        var open = !!ui.open[g.cat.id];
+        var head = U.el('button', {
+          class: 'lrow lgrp', type: 'button', 'aria-expanded': String(open),
+          dataset: { cat: g.cat.id }
+        }, [
+          U.el('span', { class: 'card-ic' }, U.icon(g.cat.icon, 18)),
+          U.el('span', { class: 'card-b' }, [
+            U.el('span', { class: 'card-t', text: g.cat.label }),
+            sub ? U.el('span', { class: 'card-s' }, U.bidi(sub)) : null
+          ]),
+          U.el('span', { class: 'lcnt', text: String(g.docs.length) }),
+          U.el('span', { class: 'ic-chev' }, U.icon('i-chevron', 18))
+        ]);
+        head.addEventListener('click', function () {
+          ui.open[g.cat.id] = !ui.open[g.cat.id];
+          paintList(manifest);
+        });
+        gbox.appendChild(head);
+        if (open) {
+          g.docs.forEach(function (d) {
+            gbox.appendChild(linkDocRow(e, src, manifest, d, promoted[d.id], null));
+          });
+        }
+      });
+      listBox.appendChild(gbox);
+    }
+
+    function paint() {
+      U.clear(box);
+      var cache = L.cached(src.key);
+      var manifest = cache && cache.manifest;
+
+      box.appendChild(lsecHead('מ' + src.label, manifest ? String(manifest.docs.length) : ''));
+
+      var status = ui.busy ? 'מעדכן מ' + src.app + '…'
+        : cache ? 'מראה של ' + src.app + ' · עודכן ' + ago(cache.at)
+        : 'מראה של ' + src.app;
+      var refreshBtn = U.el('button', {
+        class: 'iconbtn', type: 'button', 'aria-label': 'עדכון מ' + src.label,
+        onClick: function () { refresh(true); }
+      }, U.icon('i-refresh', 18));
+      box.appendChild(U.el('div', { class: 'mirror-h' + (ui.busy ? ' spin' : '') }, [
+        U.icon('i-link', 16), U.el('span', { text: status }), refreshBtn
+      ]));
+
+      if (ui.err) {
+        box.appendChild(U.el('div', { class: 'notice notice-warn' }, [
+          U.icon('i-alert', 18), U.el('span', { text: ui.err })
+        ]));
+      } else if (!L.ready()) {
+        box.appendChild(U.el('div', { class: 'notice notice-info' }, [
+          U.icon('i-link', 18), U.el('span', { text: L.whyNot() })
+        ]));
+      }
+
+      if (!manifest) {
+        if (!ui.err && L.ready()) {
+          box.appendChild(U.el('div', { class: 'lbox' },
+            U.el('div', { class: 'lempty', text: 'קורא את רשימת המסמכים מ' + src.app + '…' })));
+        }
+        return;
+      }
+
+      /* מסמך כספת שהמקור שלו נעלם. הוא לא נמחק מכאן לבד — הכספת אחראית
+         על התפוגה שלו — אבל גם לא נשאר בשקט. */
+      L.orphans(src.key, manifest, state.docs).forEach(function (doc) {
+        var keep = U.el('button', { class: 'btn', type: 'button' }, 'שמור עותק בכספת');
+        var drop = U.el('button', { class: 'btn ghost', type: 'button' }, 'הסר מהכספת');
+        keep.addEventListener('click', function () {
+          L.keepCopy(doc).then(function () {
+            UI.toast('העותק יעלה לדרייב של הכספת בסנכרון הבא');
+            window.App.render();
+          }, function (err) { UI.toast(err.message); });
+        });
+        drop.addEventListener('click', function () {
+          UI.confirm({ title: 'הסרה מהכספת', body: doc.title, ok: 'הסרה', danger: true })
+            .then(function (yes) {
+              if (!yes) return;
+              DB.deleteDoc(doc.id).then(function () { UI.toast('הוסר'); window.App.render(); });
+            });
+        });
+        box.appendChild(U.el('div', { class: 'notice notice-warn lorphan' }, [
+          U.icon('i-alert', 18),
+          U.el('span', { text: '"' + doc.title + '" נמחק ב' + src.app + ', אבל הוא שמור בכספת.' })
+        ]));
+        box.appendChild(U.el('div', { class: 'lacts' }, [keep, drop]));
+      });
+
+      var input = U.el('input', {
+        class: 'search-i', type: 'search', inputmode: 'search', id: 'link-q-' + e.id,
+        placeholder: 'חיפוש ב' + U.count(manifest.docs.length, 'מסמך אחד', 'מסמכים'),
+        'aria-label': 'חיפוש במסמכים מ' + src.label, value: ui.q
+      });
+      /* ההקלדה מציירת רק את הרשימה. ציור של כל המדף היה מחליף את השדה
+         באמצע מילה, והסמן היה קופץ להתחלה. */
+      input.addEventListener('input', function () { ui.q = input.value; paintList(manifest); });
+      box.appendChild(U.el('div', { class: 'search' }, [U.icon('i-search'), input]));
+      box.appendChild(listBox);
+      paintList(manifest);
+    }
+
+    function refresh(manual) {
+      if (ui.busy || !L.ready()) return;
+      ui.busy = true;
+      paint();
+      L.refresh(src.key).then(function (r) {
+        ui.busy = false; ui.err = '';
+        if (!r.first && r.added.length) {
+          UI.toast(U.count(r.added.length, 'מסמך חדש אחד', 'מסמכים חדשים') + ' מ' + src.label);
+        } else if (manual) {
+          UI.toast('הרשימה עודכנה');
+        }
+        if (box.isConnected) paint();
+      }, function (err) {
+        ui.busy = false;
+        ui.err = (err && err.message) || 'העדכון נכשל';
+        if (box.isConnected) paint();
+      });
+    }
+
+    paint();
+    var cache = L.cached(src.key);
+    if (!cache || U.now() - cache.at > LINK_STALE_MS) refresh(false);
+    return box;
+  };
+
+  /* מסמך במראה. קריאה בלבד: לכל מסמך בעלים אחד, והמקור הוא הבעלים. */
+  Screens.linkedDoc = function (eid, did) {
+    var L = window.Linked;
+    var e = state.byId[eid];
+    var src = L.of(e);
+    if (!e || !src) return Screens.missing('הישות לא נמצאה');
+    var cache = L.cached(src.key);
+    var d = cache && L.find(cache.manifest, did);
+    if (!d) return Screens.missing('המסמך לא נמצא במראה. ייתכן שהוא נמחק ב' + src.app + '.');
+
+    var cat = L.cat(cache.manifest, d.cat);
+    var promoted = L.promoted(src.key, state.docs)[d.id] || null;
+
+    var wrap = U.el('div', { class: 'scr scr-flush' }, backHead(d.title, [
+      U.el('button', {
+        class: 'iconbtn', type: 'button', 'aria-label': 'שיתוף',
+        onClick: function () {
+          L.file(src.key, d).then(function (rec) {
+            return Share.file(rec.data, d.name || d.title, rec.mime).then(function (mode) {
+              if (mode === 'download') UI.toast('הקובץ הורד');
+            });
+          }, function (err) { UI.toast(err.message); });
+        }
+      }, U.icon('i-share', 22))
+    ], '#/entity/' + eid));
+
+    var body = U.el('div', { class: 'scr-body' });
+    wrap.appendChild(body);
+
+    var headCard = U.el('div', { class: 'doc-head' });
+    var holder = U.el('div', { class: 'anchor-none' });
+    headCard.appendChild(holder);
+    body.appendChild(headCard);
+
+    var sizeRow = { key: '__file', label: 'קובץ', value: '', kind: 'text', verified: true };
+    L.file(src.key, d).then(function (rec) {
+      holder.remove();
+      paintAnchor(headCard, rec, d.name || d.title, null);
+    }, function (err) {
+      body.insertBefore(U.el('div', { class: 'notice notice-warn' }, [
+        U.icon('i-alert', 18), U.el('span', { text: err.message })
+      ]), headCard);
+    });
+
+    headCard.appendChild(U.el('div', { class: 'doc-meta' }, [
+      U.el('div', {}, [
+        U.el('div', { class: 'card-t', text: cat.label }),
+        U.el('div', { class: 'card-s', text: e.name })
+      ]),
+      U.el('span', { class: 'chip lsrc' }, [U.icon('i-link', 12), U.el('span', { text: 'מ' + src.label })])
+    ]));
+
+    /* אותן שורות כמו במסמך כספת, ולכן אותה נגיעה מעתיקה סכום או תאריך */
+    var rows = [];
+    if (d.date) rows.push({ key: '__date', label: 'תאריך המסמך', value: d.date, kind: 'date', verified: true });
+    if (d.amount) rows.push({ key: '__amount', label: 'סכום', value: L.money(d.amount), kind: 'text', verified: true });
+    if (d.payment != null) rows.push({ key: '__payment', label: 'מקושר לתשלום', value: '#' + d.payment, kind: 'text', verified: true });
+    sizeRow.value = (d.mime === 'application/pdf' ? 'PDF' : 'תמונה') + ' · ' + U.bytes(d.size);
+    rows.push(sizeRow);
+    body.appendChild(UI.rowsCard(rows.map(function (f) { return UI.fieldRow(f, {}); })));
+
+    if (d.summary) {
+      body.appendChild(U.el('div', { class: 'notes' }, [
+        U.el('div', { class: 'notes-l', text: 'תקציר' }),
+        U.el('div', { text: d.summary })
+      ]));
+    }
+
+    body.appendChild(U.el('div', { class: 'notice notice-info', style: 'margin-top:12px' }, [
+      U.icon('i-link', 18),
+      U.el('span', { text: 'קריאה בלבד. עריכה, שינוי קבוצה ומחיקה נעשים ב' + src.app + '.' })
+    ]));
+
+    var main = U.el('button', { class: 'btn', type: 'button' },
+      promoted ? 'פתיחה בכספת' : 'הוסף לכספת');
+    main.addEventListener('click', function () {
+      if (promoted) { location.hash = '#/doc/' + promoted.id; return; }
+      Screens.promoteSheet(e, src, d);
+    });
+    var out = U.el('a', {
+      class: 'btn ghost', href: src.url, target: '_blank', rel: 'noopener'
+    }, [U.icon('i-out', 18), U.el('span', { text: 'פתח ב' + src.label })]);
+    body.appendChild(U.el('div', { class: 'lacts' }, [main, out]));
+
+    return wrap;
+  };
+
+  /* הוספה לכספת. הסוג המוצע נגזר מהקבוצה במקור; קבוצה שאין לה הצעה —
+     כולל כל קבוצה שהמשתמש הוסיף שם — פשוט שואלת. */
+  Screens.promoteSheet = function (e, src, d) {
+    var L = window.Linked;
+    var suggested = L.typeFor(src, d.cat, e.type);
+    var types = DT.forEntityType(e.type).slice().sort(function (a, b) {
+      return (b.key === suggested) - (a.key === suggested);
+    });
+    var pick = U.el('div', { class: 'lpick' });
+    var sheet;
+    var busy = false;
+
+    types.forEach(function (t) {
+      var card = U.el('button', {
+        class: 'card', type: 'button', 'aria-pressed': String(t.key === suggested)
+      }, [
+        U.el('span', { class: 'card-ic' }, U.icon(t.icon, 20)),
+        U.el('span', { class: 'card-b' }, [
+          U.el('span', { class: 'card-t', text: t.label }),
+          t.key === suggested
+            ? U.el('span', { class: 'card-s', text: 'מוצע לפי הקבוצה ב' + src.label })
+            : (DT.hasExpiry(t.key) ? U.el('span', { class: 'card-s', text: 'עם תאריך תפוגה' }) : null)
+        ])
+      ]);
+      card.addEventListener('click', function () {
+        if (busy) return;
+        busy = true;
+        card.setAttribute('aria-pressed', 'true');
+        L.promote(src.key, e.id, d, t.key).then(function (doc) {
+          sheet.close();
+          UI.toast('נוסף לכספת. השלם את הפרטים ושמור');
+          location.hash = '#/doc/' + doc.id + '/edit';
+        }, function (err) {
+          busy = false;
+          UI.toast(err.message);
+        });
+      });
+      pick.appendChild(card);
+    });
+
+    sheet = UI.sheet(d.title + ' לכספת', [
+      U.el('p', { class: 'muted small', text:
+        'הקובץ נשאר ב' + src.folder + ' בדרייב. הכספת שומרת הפניה אליו ואינה מעלה אותו שוב.' }),
+      pick
+    ]);
+  };
+
+  /* קישור ישות למקור — מההגדרות. פעם אחת. */
+  Screens.linkSheet = function (src) {
+    var L = window.Linked;
+    var current = L.entityFor(src.key, state.entities);
+    var homes = state.entities.filter(function (x) { return x.type === src.entityType; });
+    var status = U.el('div', { class: 'lfacts' });
+    var choice = current ? current.id : (homes[0] ? homes[0].id : '__new');
+    var pick = U.el('div', { class: 'lpick' });
+    var err = U.el('p', { class: 'form-err', role: 'alert' });
+    var go = U.el('button', { class: 'btn wide', type: 'button' }, current ? 'שמירה' : 'קשר');
+    var manifest = null;
+
+    function fact(icon, text) {
+      return U.el('div', {}, [U.icon(icon, 16), U.el('span', { text: text })]);
+    }
+
+    function paintPick() {
+      U.clear(pick);
+      var opts = homes.map(function (h) { return { id: h.id, label: h.name, sub: 'ישות קיימת' }; });
+      opts.push({ id: '__new', label: (manifest && manifest.title) || src.app, sub: 'ישות חדשה' });
+      opts.forEach(function (o) {
+        var c = U.el('button', { class: 'card', type: 'button', 'aria-pressed': String(o.id === choice) }, [
+          U.el('span', { class: 'card-ic' }, U.icon(o.id === '__new' ? 'i-plus' : 'i-home', 20)),
+          U.el('span', { class: 'card-b' }, [
+            U.el('span', { class: 'card-t', text: o.label }),
+            U.el('span', { class: 'card-s', text: o.sub })
+          ])
+        ]);
+        c.addEventListener('click', function () { choice = o.id; paintPick(); });
+        pick.appendChild(c);
+      });
+    }
+
+    var kids = [
+      U.el('p', { class: 'muted small', text:
+        'הישות תציג את המסמכים ש' + src.app + ' כבר העלתה לתיקייה "' + src.folder +
+        '". שום קובץ לא מועלה שוב ולא משוכפל.' }),
+      status, U.el('div', { class: 'sect-h', text: 'לאיזו ישות לחבר' }), pick, err, go
+    ];
+    if (current) {
+      var off = U.el('button', { class: 'btn ghost danger wide', type: 'button' }, 'ניתוק');
+      off.addEventListener('click', function () {
+        L.unlink(current).then(function () {
+          sheet.close(); UI.toast('הקישור נותק. מסמכים שכבר בכספת נשארו');
+          window.App.render();
+        });
+      });
+      kids.push(off);
+    }
+    var sheet = UI.sheet('מסמכים מ' + src.label, kids);
+
+    paintPick();
+    if (!L.ready()) {
+      status.appendChild(fact('i-alert', L.whyNot()));
+      go.disabled = true;
+      return;
+    }
+    status.appendChild(fact('i-refresh', 'בודק את הדרייב…'));
+    L.refresh(src.key).then(function (r) {
+      manifest = r.manifest;
+      var groups = L.groups(manifest);
+      var bytes = manifest.docs.reduce(function (a, x) { return a + (x.size || 0); }, 0);
+      U.clear(status);
+      status.appendChild(fact('i-folder', U.count(manifest.docs.length, 'מסמך אחד', 'מסמכים') + ' · ' +
+        U.count(groups.length, 'קבוצה אחת', 'קבוצות') + ' · ' + U.bytes(bytes)));
+      status.appendChild(fact('i-check', 'אפס העלאה ואפס עותקים בדרייב'));
+      status.appendChild(fact('i-check', 'קריאה בלבד. הכספת לא משנה ולא מוחקת שם דבר'));
+      paintPick();
+    }, function (e2) {
+      U.clear(status);
+      status.appendChild(fact('i-alert', e2.message));
+      go.disabled = true;
+    });
+
+    go.addEventListener('click', function () {
+      if (go.disabled) return;
+      go.disabled = true;
+      var target = choice === '__new' ? null : state.byId[choice];
+      var entity = target || {
+        id: U.id(), type: src.entityType,
+        name: ((manifest && manifest.title) || src.app).slice(0, 40),
+        color: C.ENTITY_COLORS[0], avatar: '', avatarImage: '', avatarFocus: { x: 50, y: 50 },
+        sortOrder: Date.now()
+      };
+      if (!entity.avatar) entity.avatar = entity.name[0];
+      L.link(src.key, entity, state.entities).then(function () {
+        sheet.close();
+        UI.toast('הקישור נוצר');
+        location.hash = '#/entity/' + entity.id;
+      }, function (e3) { go.disabled = false; err.textContent = e3.message; });
+    });
+  };
+
   /* ---------- כרטיס מסמך ---------- */
+
+  /* העוגן הוויזואלי בראש מסמך. משותף למסמך כספת ולמסמך במראה. */
+  function paintAnchor(headCard, rec, name, focus) {
+    if (rec.mime === 'application/pdf') {
+      /* עמוד ראשון כתצוגה מקדימה — עוגן ויזואלי אמיתי במקום אייקון אפור */
+      var box = U.el('div', { class: 'anchor anchor-pdf' });
+      headCard.insertBefore(box, headCard.firstChild);
+      UI.renderPdf(rec.data, box, { limit: 1 });
+      box.addEventListener('click', function () { UI.viewer(rec, name); });
+      return;
+    }
+    var url = URL.createObjectURL(rec.data);
+    var img = U.el('img', { class: 'anchor', src: url, alt: 'צילום המסמך' });
+    /* המסגרת שהמשתמש בחר בעריכה — מיקום והגדלה. ברירת המחדל היא
+       ראש התמונה בלי הגדלה, וזה בדיוק מה שמסמך ישן כבר נראה. */
+    UI.applyFocus(img, focus || {}, { x: 50, y: 0 });
+    img.addEventListener('load', function () { URL.revokeObjectURL(url); });
+    var anchorWrap = U.el('span', { class: 'anchor-wrap' }, img);
+    anchorWrap.addEventListener('click', function () { UI.viewer(rec, name); });
+    headCard.insertBefore(anchorWrap, headCard.firstChild);
+  }
+
+  /* הקובץ של מסמך. מקומי אם יש; קובץ מקושר (DEC-47) שעוד לא ירד למכשיר
+     הזה יורד מהמקור שלו — ונשמר בקאש של המראה, לא כ-blob של המסמך. */
+  function fileRec(f) {
+    return DB.blob(f.blobId).then(function (rec) {
+      if (rec || !f.src || !f.driveFileId) return rec || null;
+      return window.Linked.file(f.src, { fileId: f.driveFileId, mime: f.mime })
+        .catch(function (e) { UI.toast(e.message); return null; });
+    });
+  }
 
   Screens.doc = function (id) {
     var doc = state.docs.filter(function (d) { return d.id === id; })[0];
@@ -556,29 +1094,28 @@
 
     if (doc.files && doc.files.length) {
       var first = doc.files[0];
-      DB.blob(first.blobId).then(function (rec) {
+      fileRec(first).then(function (rec) {
         if (!rec) return;
-        if (rec.mime === 'application/pdf') {
-          /* עמוד ראשון כתצוגה מקדימה — עוגן ויזואלי אמיתי במקום אייקון אפור */
-          var box = U.el('div', { class: 'anchor anchor-pdf' });
-          headCard.insertBefore(box, headCard.firstChild);
-          UI.renderPdf(rec.data, box, { limit: 1 });
-          box.addEventListener('click', function () { UI.viewer(rec, first.name); });
-        } else {
-          var url = URL.createObjectURL(rec.data);
-          var img = U.el('img', { class: 'anchor', src: url, alt: 'צילום המסמך' });
-          /* המסגרת שהמשתמש בחר בעריכה — מיקום והגדלה. ברירת המחדל היא
-             ראש התמונה בלי הגדלה, וזה בדיוק מה שמסמך ישן כבר נראה. */
-          UI.applyFocus(img, { x: first.focusX, y: first.focusY, z: first.focusZ },
-            { x: 50, y: 0 });
-          img.addEventListener('load', function () { URL.revokeObjectURL(url); });
-          var anchorWrap = U.el('span', { class: 'anchor-wrap' }, img);
-          anchorWrap.addEventListener('click', function () { UI.viewer(rec, first.name); });
-          headCard.insertBefore(anchorWrap, headCard.firstChild);
-        }
+        paintAnchor(headCard, rec, first.name,
+          { x: first.focusX, y: first.focusY, z: first.focusZ });
       });
     } else {
       headCard.appendChild(U.el('div', { class: 'anchor-none' }));
+    }
+
+    /* מסמך שהקובץ שלו מגיע ממקור מקושר — DEC-47. אומר את זה פעם אחת,
+       ומוביל למסמך במראה, ששם רואים את מה שהמקור יודע עליו. */
+    var lfile = (doc.files || []).filter(function (f) { return f.src; })[0];
+    var lsrc = lfile ? window.Linked.source(lfile.src) : null;
+    if (lsrc) {
+      var toMirror = U.el('button', { class: 'notice notice-info notice-go', type: 'button' }, [
+        U.icon('i-link', 18),
+        U.el('span', { text: 'הקובץ נשאר ב' + lsrc.app + ' ולא הועלה שוב. למסמך במראה' })
+      ]);
+      toMirror.addEventListener('click', function () {
+        location.hash = '#/linked/' + doc.entityId + '/' + encodeURIComponent(lfile.srcId || '');
+      });
+      body.insertBefore(toMirror, headCard);
     }
 
     var days = doc.expiryDate ? E.daysLeft(doc.expiryDate) : null;
@@ -642,7 +1179,9 @@
       onClick: function () {
         UI.confirm({
           title: 'מחיקת מסמך',
-          body: 'המסמך והקבצים שלו יימחקו. אי אפשר לבטל.',
+          body: lsrc
+            ? 'המסמך יימחק מהכספת. הקובץ נשאר ב' + lsrc.app + ' ובמראה.'
+            : 'המסמך והקבצים שלו יימחקו. אי אפשר לבטל.',
           ok: 'מחיקה', danger: true
         }).then(function (yes) {
           if (!yes) return;
@@ -668,7 +1207,7 @@
         U.el('span', { class: 'file-s' }, U.bidi(U.bytes(f.size)))
       ]);
       row.addEventListener('click', function () {
-        DB.blob(f.blobId).then(function (rec) { if (rec) UI.viewer(rec, f.name); });
+        fileRec(f).then(function (rec) { if (rec) UI.viewer(rec, f.name); });
       });
 
       function act(label, icon, fn) {
@@ -679,7 +1218,7 @@
       }
 
       act('שיתוף הקובץ', 'i-share', function () {
-        DB.blob(f.blobId).then(function (rec) {
+        fileRec(f).then(function (rec) {
           if (!rec) { UI.toast('הקובץ לא נמצא'); return; }
           return Share.file(rec.data, f.name, f.mime).then(function (mode) {
             if (mode === 'download') UI.toast('הקובץ הורד');
@@ -1780,6 +2319,27 @@
       'בדיוק כמו כל קובץ אחר בחשבון הגוגל שלך — לא יותר. דרכונים אינם עולים.' }));
 
     wrap.appendChild(section('גיבוי לדרייב', driveKids));
+
+    /* ---- מסמכים מקושרים — DEC-47 ----
+       שורה לכל מקור בטבלה. המצב נאמר במילים: למה מקושר, או למה לא. */
+    var linkKids = window.Linked.sources().map(function (src) {
+      var ent = window.Linked.entityFor(src.key, state.entities);
+      var cache = window.Linked.cached(src.key);
+      var sub = ent
+        ? 'מקושר ל' + ent.name + (cache ? ' · ' + U.count(cache.manifest.docs.length, 'מסמך אחד', 'מסמכים') : '')
+        : 'מסמכים ש' + src.app + ' כבר העלתה לדרייב, בלי להעלות אותם שוב';
+      return U.el('div', { class: 'set-row' }, [
+        U.el('span', { class: 'set-b' }, [
+          U.el('span', { class: 'set-l', text: src.folder }),
+          U.el('span', { class: 'set-s', text: sub })
+        ]),
+        U.el('button', {
+          class: 'btn ghost lset-btn', type: 'button',
+          onClick: function () { Screens.linkSheet(src); }
+        }, ent ? 'ניהול' : 'קישור')
+      ]);
+    });
+    if (linkKids.length) wrap.appendChild(section('מסמכים מקושרים', linkKids));
 
     /* ---- פרסינג בענן ---- */
     var keyInput = U.el('input', {

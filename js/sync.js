@@ -37,15 +37,24 @@
       /* המסגרת נוסעת — שלושת המספרים. היא בחירה של המשתמש ולא ערך נגזר,
          ומכשיר שני שמציג את אותו מסמך במסגרת אחרת נראה כמו באג. `focusZ`
          ברירת מחדל 1 ולא 0, אחרת מסמך ישן היה חוזר בהגדלה אפס. */
-      return {
+      var out = {
         driveFileId: f.driveFileId || null, mime: f.mime,
         name: f.name, size: f.size,
         focusX: typeof f.focusX === 'number' ? f.focusX : 50,
         focusY: f.focusY || 0,
         focusZ: typeof f.focusZ === 'number' ? f.focusZ : 1
       };
+      return linkMark(f, out);
     });
     return copy;
+  }
+
+  /* קובץ מקושר (DEC-47) הוא קובץ של אפליקציה אחרת. `src` אומר של מי,
+     ו-`srcId` איזה מסמך שם. שניהם נוסעים: מכשיר שני חייב לדעת שאת הקובץ
+     הזה מורידים מהמקור ולא מ-DocVault, ושאסור להעלות אותו שוב. */
+  function linkMark(from, to) {
+    if (from && from.src) { to.src = from.src; to.srcId = from.srcId || null; }
+    return to;
   }
 
   Sync.exportDb = function () {
@@ -72,14 +81,14 @@
 
     var out = (remoteDoc.files || []).map(function (rf) {
       var lf = rf.driveFileId ? byDrive[rf.driveFileId] : null;
-      return {
+      return linkMark(rf, {
         blobId: lf ? lf.blobId : null,
         driveFileId: rf.driveFileId || null,
         mime: rf.mime, name: rf.name, size: rf.size,
         focusX: typeof rf.focusX === 'number' ? rf.focusX : 50,
         focusY: rf.focusY || 0,
         focusZ: typeof rf.focusZ === 'number' ? rf.focusZ : 1
-      };
+      });
     });
 
     ((localDoc && localDoc.files) || []).forEach(function (f) {
@@ -257,7 +266,13 @@
       });
       return missing.reduce(function (chain, item) {
         return chain.then(function () {
-          return T.downloadBlob(item.file.driveFileId).then(function (blob) {
+          /* קובץ מקושר יורד מהמקור שלו. תחבורה שאינה יודעת לקרוא מקורות
+             (OAuth) משאירה אותו בלי blob, והמסך מוריד אותו כשיש גשר. */
+          var f = item.file;
+          var get = f.src
+            ? (T.linkDownload ? T.linkDownload(f.src, f.driveFileId) : Promise.reject(new Error('no-link')))
+            : T.downloadBlob(f.driveFileId);
+          return get.then(function (blob) {
             var id = U.id();
             item.file.blobId = id;
             return DB.saveDoc(item.doc, [{

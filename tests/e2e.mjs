@@ -98,13 +98,13 @@ const flagged = await page.textContent('.rows');
 t('שדה שנכשל בוולידציה נשמר', flagged.includes('4183920'));
 t('ומסומן לאימות', (await page.locator('.chip.verify').count()) > 0);
 
-// ---------- all 12 types ----------
-console.log('\n— כל 12 הסוגים —');
+// ---------- all 14 types ----------
+console.log('\n— כל 14 הסוגים —');
 const types = await page.evaluate(() => window.DOC_TYPES.all().map(t => ({
   key: t.key, expiry: t.expiry, ent: t.entityTypes[0],
   req: t.fields.filter(f => f.required).map(f => ({ key: f.key, kind: f.kind }))
 })));
-t('הטבלה מכילה 12 שורות', types.length === 12, String(types.length));
+t('הטבלה מכילה 14 שורות', types.length === 14, String(types.length));
 
 const sample = { id: '123456782', plate: '8452103', policy: 'PL2291043', passport: 'M4821639', text: 'בדיקה', date: ymd(30), phone: '0524418890' };
 const entName = { person: 'ליאור', vehicle: 'מאזדה 3', home: 'הבית' };
@@ -116,7 +116,7 @@ for (const ty of types) {
   await newDoc(entName[ty.ent] || 'ליאור', ty.key, fill, { expiry: ymd(45) });
   made++;
 }
-t('נוצר מסמך מכל אחד מ-12 הסוגים', made === 12, String(made));
+t('נוצר מסמך מכל אחד מ-14 הסוגים', made === 14, String(made));
 
 // passport must not offer files
 await page.click('.nav-i[data-hash="#/entities"]');

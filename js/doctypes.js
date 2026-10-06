@@ -150,6 +150,31 @@
       ]
     },
 
+    /* שני הסוגים הבאים נולדו מהמראה של התקציב (DEC-47): אלה המסמכים של
+       דירה בבנייה שיש בהם משהו לכספת — תפוגה, או מספר שמעתיקים. */
+    sale_guarantee: {
+      label: 'ערבות חוק המכר', icon: 'i-bank',
+      entityTypes: ['home'], expiry: 'optional', allowFiles: true, parse: 'gemini',
+      fields: [
+        { key: 'guaranteeNumber', label: 'מספר ערבות', kind: 'text', required: true },
+        { key: 'bank',            label: 'בנק מנפיק',  kind: 'text', required: true },
+        { key: 'amount',          label: 'סכום',       kind: 'text' },
+        { key: 'developer',       label: 'יזם',        kind: 'text' }
+      ]
+    },
+
+    purchase_contract: {
+      label: 'חוזה רכישה', icon: 'i-sign',
+      entityTypes: ['home'], expiry: 'none', allowFiles: true, parse: 'gemini',
+      titleFrom: 'seller',
+      fields: [
+        { key: 'seller',  label: 'מוכר / יזם',  kind: 'text', required: true },
+        { key: 'address', label: 'כתובת הנכס', kind: 'text', multiline: true },
+        { key: 'price',   label: 'מחיר',       kind: 'text' },
+        { key: 'lawyer',  label: 'עורך דין',   kind: 'text' }
+      ]
+    },
+
     /* שסתום הביטחון.
 
        `openFields` הוא ההבדל בין שסתום לבין חור בקיר: תעודה שאין לה שורה
