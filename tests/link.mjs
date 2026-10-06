@@ -66,11 +66,27 @@ const ContentService = {
   createTextOutput: s => ({ text: s, setMimeType() { return this; } })
 };
 
+/* הסוד יושב ב-Script properties ולא בקובץ (DEC-48), ולכן הקובץ נטען כמו
+   שהוא — בלי החלפת טקסט — וזה בדיוק מה שהמשתמש מדביק. */
 const SECRET = 'סוד-אקראי-ארוך-מאוד-לבדיקה';
-const gs = vm.createContext({ DriveApp, Utilities, ContentService, JSON, String, Number, Error });
-vm.runInContext(readFileSync(new URL('../tools/bridge.gs', import.meta.url), 'utf8')
-  .replace(/var SECRET = '[^']*';/, "var SECRET = '" + SECRET + "';"), gs);
+const props = { SECRET: SECRET + '  ' };
+const PropertiesService = { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null) }) };
+const gsSrc = readFileSync(new URL('../tools/bridge.gs', import.meta.url), 'utf8');
+const gs = vm.createContext({ DriveApp, Utilities, ContentService, PropertiesService, JSON, String, Number, Error, Math });
+vm.runInContext(gsSrc, gs);
 const post = body => JSON.parse(gs.doPost({ postData: { contents: JSON.stringify(body) } }).text);
+
+console.log('\n— הסוד ב-Script properties —');
+t('הקובץ אינו נושא סוד', !/^var SECRET\s*=/m.test(gsSrc));
+t('הסוד נקרא מה-properties, ורווח נגרר נחתך', post({ token: SECRET, action: 'ping' }).ok);
+t('סוד שגוי נדחה', post({ token: SECRET + 'x', action: 'ping' }).error === 'סוד שגוי');
+props.SECRET = 'קצר';
+const short = post({ token: 'קצר', action: 'ping' });
+t('סוד קצר נדחה, עם האורך', !short.ok && /קצר מדי — 3 תווים/.test(short.error), short.error);
+delete props.SECRET;
+const none = post({ token: '', action: 'ping' });
+t('בלי סוד — ההודעה אומרת איפה מגדירים אותו', !none.ok && /Script properties → SECRET/.test(none.error), none.error);
+props.SECRET = SECRET;
 
 /* ---------- מה שהתקציב השאיר בדרייב ---------- */
 const docsFolder = node('folder', 'HomeBudget מסמכים', null);

@@ -21,13 +21,20 @@
  *      והורדה מאומתת מול תיקיית המסמכים של המקור.
  *
  * ⚠️ הכתובת והסוד הם **צמד גישה**. מי שמחזיק את שניהם יכול לקרוא ולכתוב
- *    בתיקיית DocVault שלך. אל תשלח אותם בערוץ פתוח, ואם דלפו — פרוס מחדש
- *    עם סוד חדש (זה מבטל את הישן מיידית).
+ *    בתיקיית DocVault שלך. אל תשלח אותם בערוץ פתוח, ואם דלפו — שנה את
+ *    SECRET ב-Script properties (זה מבטל את הישן מיידית, בלי פריסה).
+ *
+ * **הסוד אינו כתוב בקובץ הזה** (DEC-48). הוא יושב ב-Script properties של
+ * הפרויקט, ולכן עדכון הקוד הוא הדבקה ופריסה — בלי להעתיק את הסוד הצידה
+ * ולהחזיר אותו, ובלי סוד שנשכח בתוך עותק של הקובץ. כך זה עובד גם בגשר של
+ * גבעתיים.
  *
  * ---------- התקנה, פעם אחת ----------
  *
  *   1. script.google.com → New project → הדבק את הקובץ הזה במקום התוכן.
- *   2. שנה את SECRET למחרוזת אקראית משלך — 16 תווים לפחות, ורצוי 32.
+ *   2. Project Settings (גלגל שיניים) → Script properties → Add property:
+ *        Property: SECRET
+ *        Value:    מחרוזת אקראית משלך — 16 תווים לפחות, ורצוי 32.
  *      הכתובת חשופה ("Anyone"), ולכן הסוד הוא כל ההגנה. סוד קצר נשבר
  *      בניחוש, ולכן הגשר מסרב לרוץ איתו.
  *   3. Deploy → New deployment → סוג: Web app.
@@ -40,6 +47,15 @@
  *      האפליקציה, תחת "גיבוי לדרייב".
  *
  * אחרי כל שינוי בקובץ: Deploy → Manage deployments → עריכה → New version.
+ * (לא New deployment — זו כתובת חדשה, והכתובת השמורה באפליקציה תפסיק לעבוד.)
+ * שינוי של הסוד עצמו אינו שינוי בקובץ: משנים את SECRET ב-Script properties,
+ * וזה תופס מיד, בלי פריסה.
+ *
+ * ---------- מעבר מגשר שהסוד שלו כתוב בקובץ ----------
+ *
+ * גרסאות קודמות החזיקו `var SECRET = '...'` בראש הקובץ. לפני שמדביקים את
+ * הגרסה הזאת: העתק את הערך משם ל-Script properties → SECRET. אחר כך הדבק,
+ * ופרוס New version. האפליקציה לא צריכה שום שינוי — הסוד נשאר אותו סוד.
  *
  * ---------- אם הפריסה נכשלת ----------
  *
@@ -52,9 +68,6 @@
  * אז יש להקים את הגשר בחשבון פרטי. והכתובת חייבת להסתיים ב-/exec; כתובת
  * /dev היא הפריסה הזמנית, והיא דורשת התחברות.
  */
-
-/** שנה אותי. מחרוזת אקראית: 16 תווים זה המינימום שהגשר מקבל, 32 זה המומלץ. */
-var SECRET = 'שנה-אותי-למחרוזת-אקראית-ארוכה';
 
 var ROOT_NAME = 'DocVault';
 var FILES_NAME = 'files';
@@ -77,16 +90,34 @@ function doPost(e) {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     /* שתי הודעות ולא אחת: "לא הוגדר" ו"קצר מדי" הן תקלות שונות, והודעה
        אחת לשתיהן שולחת את מי שהגדיר סוד קצר לחפש במקום הלא נכון. */
-    if (!SECRET) throw new Error('SECRET לא הוגדר בגשר');
-    if (SECRET.length < MIN_SECRET) {
-      throw new Error('הסוד בגשר קצר מדי — ' + SECRET.length + ' תווים, ' +
+    var secret = _secret();
+    if (!secret) {
+      throw new Error('הסוד לא הוגדר בגשר — Project Settings → Script properties → SECRET');
+    }
+    if (secret.length < MIN_SECRET) {
+      throw new Error('הסוד בגשר קצר מדי — ' + secret.length + ' תווים, ' +
                       'נדרשים ' + MIN_SECRET + ' לפחות');
     }
-    if (String(req.token || '') !== SECRET) throw new Error('סוד שגוי');
+    if (!_same(String(req.token || ''), secret)) throw new Error('סוד שגוי');
     return _json({ ok: true, result: _handle(req) });
   } catch (err) {
     return _json({ ok: false, error: String((err && err.message) || err) });
   }
+}
+
+/* הסוד מ-Script properties ולא מהקובץ — DEC-48. רווח נגרר שנדבק עם הערך
+   הוא הסיבה הנפוצה ל"סוד שגוי", ולכן הוא נחתך כאן ולא נשאר לניחוש. */
+function _secret() {
+  return String(PropertiesService.getScriptProperties().getProperty('SECRET') || '').trim();
+}
+
+/* השוואה בזמן קבוע, כדי שזמן התגובה לא ילמד כמה תווים מהסוד נוחשו נכון. */
+function _same(a, b) {
+  var diff = a.length ^ b.length;
+  for (var i = 0; i < Math.max(a.length, b.length); i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
 }
 
 function _handle(req) {

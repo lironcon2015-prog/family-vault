@@ -273,10 +273,14 @@ t('ו-blobId המקומי לא עזב את המכשיר',
 console.log('\n— bridge.gs —');
 const gs = await page.evaluate(() => fetch('/tools/bridge.gs').then(r => r.text()));
 t('קיים בריפו', gs.length > 500, String(gs.length));
-t('בודק את הסוד לפני כל פעולה', /String\(req\.token \|\| ''\) !== SECRET/.test(gs));
-t('מסרב לרוץ עם SECRET ריק', /if \(!SECRET\) throw/.test(gs));
+/* DEC-48: הסוד ב-Script properties. ההתנהגות עצמה נבדקת ב-link.mjs, שמריץ
+   את הקובץ מול PropertiesService מזויף. */
+t('הסוד נקרא מ-Script properties ולא כתוב בקובץ',
+  /getScriptProperties\(\)\.getProperty\('SECRET'\)/.test(gs) && !/^var SECRET\s*=/m.test(gs));
+t('בודק את הסוד לפני כל פעולה, בזמן קבוע', /!_same\(String\(req\.token \|\| ''\), secret\)/.test(gs));
+t('מסרב לרוץ בלי סוד, ואומר איפה מגדירים', /if \(!secret\)/.test(gs) && /Script properties → SECRET/.test(gs));
 t('ומסרב לסוד קצר, בהודעה נפרדת עם האורך',
-  /SECRET\.length < MIN_SECRET/.test(gs) && /קצר מדי/.test(gs));
+  /secret\.length < MIN_SECRET/.test(gs) && /קצר מדי/.test(gs));
 /* מספר אחד בשני צדדים. אם הם ייפרדו, אחד הצדדים ידחה מה שהשני קיבל. */
 t('הרצפה זהה בגשר ובאפליקציה',
   (gs.match(/MIN_SECRET = (\d+)/) || [])[1] === '16' &&

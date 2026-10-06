@@ -2126,7 +2126,7 @@
         U.el('ol', { class: 'steps' }, [
           U.el('li', { text: 'script.google.com → New project' }),
           U.el('li', { text: 'הדבק את tools/bridge.gs מהריפו במקום התוכן' }),
-          U.el('li', { text: 'שנה את SECRET למחרוזת אקראית — 16 תווים לפחות, מומלץ 32' }),
+          U.el('li', { text: 'Project Settings → Script properties → הוסף SECRET: מחרוזת אקראית, 16 תווים לפחות, מומלץ 32' }),
           U.el('li', { text: 'Deploy → New deployment → Web app' }),
           U.el('li', { text: 'Execute as: Me · Who has access: Anyone' }),
           U.el('li', { text: 'אשר את ההרשאות, והעתק את הכתובת שמסתיימת ב-‎/exec' })
@@ -2134,7 +2134,8 @@
         U.el('p', { class: 'muted small', text:
           'הכתובת והסוד הם צמד גישה: מי שמחזיק בשניהם יכול לקרוא ולכתוב ' +
           'בתיקיית DocVault שלך. הגשר אינו נוגע בשום קובץ מחוצה לה. ' +
-          'אם הסוד דלף — פרוס מחדש עם סוד חדש, וזה מבטל את הישן מיידית.' })
+          'אם הסוד דלף — שנה את SECRET ב-Script properties, וזה מבטל את הישן מיידית. ' +
+          'עדכון של הקוד אינו נוגע בסוד: מדביקים ופורסים New version.' })
       ]));
 
       /* התקלה שכמעט כולם נתקלים בה, ולכן היא כתובה כאן ולא רק ב-README:
