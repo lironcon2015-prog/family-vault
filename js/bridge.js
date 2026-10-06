@@ -164,5 +164,18 @@
     });
   };
 
+  /* תמונות ממוזערות של קבצי המקור — DEC-50. מחזיר מפה מזהה → Blob או
+     null (אין תמונה, או שהקובץ אינו של המקור). */
+  B.linkThumbs = function (source, fileIds) {
+    return linkCall('linkThumbs', { source: source, fileIds: fileIds }).then(function (r) {
+      var out = {};
+      var map = (r && r.thumbs) || {};
+      Object.keys(map).forEach(function (id) {
+        out[id] = map[id] ? fromB64(map[id].data, map[id].mime) : null;
+      });
+      return out;
+    });
+  };
+
   window.Bridge = B;
 })();

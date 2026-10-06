@@ -82,6 +82,7 @@ var SOURCES = {
   homebudget: { backup: 'finance-app-backup.json', folder: 'HomeBudget מסמכים' }
 };
 var LINK_TEXT_MAX = 1200;
+var LINK_THUMBS_MAX = 12;
 
 /* ---------- הכניסה ---------- */
 
@@ -129,6 +130,7 @@ function _handle(req) {
     case 'download': return _download(req);
     case 'linkManifest': return _linkManifest(req);
     case 'linkDownload': return _linkDownload(req);
+    case 'linkThumbs':   return _linkThumbs(req);
     default: throw new Error('פעולה לא מוכרת: ' + req.action);
   }
 }
@@ -322,4 +324,28 @@ function _linkDownload(req) {
     mime: blob.getContentType(),
     data: Utilities.base64Encode(blob.getBytes())
   };
+}
+
+/* תמונות ממוזערות לרשימה (DEC-50). גוגל כבר מייצרת אחת לכל קובץ בדרייב,
+   כך שקבוצה של שנים-עשר מסמכים עולה כמה עשרות קילובייט ולא שנים-עשר
+   קבצים מלאים. אותה בדיקת תיקייה כמו בהורדה; קובץ שאין לו תמונה, או
+   שאינו של המקור, חוזר ריק — רשימה שלמה לא נופלת בגלל קובץ אחד. */
+function _linkThumbs(req) {
+  var src = _source(req);
+  var ids = (req.fileIds || []).slice(0, LINK_THUMBS_MAX);
+  var out = {};
+  ids.forEach(function (id) {
+    id = String(id || '');
+    out[id] = null;
+    try {
+      var file = DriveApp.getFileById(id);
+      if (file.isTrashed() || !_inSource(file, src)) return;
+      var t = file.getThumbnail();
+      if (!t) return;
+      out[id] = { mime: t.getContentType() || 'image/png', data: Utilities.base64Encode(t.getBytes()) };
+    } catch (e) {
+      out[id] = null;
+    }
+  });
+  return { thumbs: out };
 }

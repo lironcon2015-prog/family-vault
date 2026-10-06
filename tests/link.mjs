@@ -47,6 +47,8 @@ function wrapNode(n) {
       ? node('file', a, n.id, { bytes: Buffer.from(b, 'utf8'), mime: c })
       : node('file', a.name, n.id, { bytes: a.bytes, mime: a.mime }),
     getBlob: () => mkBlob(n.bytes, n.mime, n.name),
+    /* גוגל מייצרת תמונה ממוזערת לכל קובץ — חוץ ממה שסומן noThumb */
+    getThumbnail: () => (n.kind === 'file' && !n.noThumb ? mkBlob(Buffer.from(PNG, 'base64'), 'image/png', 'thumb') : null),
     setContent: s => { n.bytes = Buffer.from(s, 'utf8'); n.updated = ++clock; }
   };
 }
@@ -139,6 +141,10 @@ const outside = post({ token: SECRET, action: 'linkDownload', source: 'homebudge
 t('קובץ מחוץ לתיקיית המסמכים נדחה', !outside.ok && /HomeBudget מסמכים/.test(outside.error), outside.error);
 const inside = post({ token: SECRET, action: 'linkDownload', source: 'homebudget', fileId: fV7 });
 t('קובץ בתוך התיקייה יורד', inside.ok && inside.result.data === PNG);
+const th = post({ token: SECRET, action: 'linkThumbs', source: 'homebudget', fileIds: [fV7, fOutside] });
+t('תמונה ממוזערת — לקובץ של המקור בלבד', th.ok && th.result.thumbs[fV7].data === PNG && th.result.thumbs[fOutside] === null);
+const many = post({ token: SECRET, action: 'linkThumbs', source: 'homebudget', fileIds: Array(20).fill(fV7).map((x, i) => i ? x + i : x) });
+t('לכל היותר 12 בבקשה', Object.keys(many.result.thumbs).length === 12);
 t('בלי הסוד — כלום', !post({ token: 'x', action: 'linkManifest', source: 'homebudget' }).ok);
 const mod = man.result.modified;
 const same = post({ token: SECRET, action: 'linkManifest', source: 'homebudget', since: mod });
@@ -250,6 +256,23 @@ t('הקבוצות מוצגות מקופלות, עם מספר', (await p.locator(
 await p.click('.lgrp[data-cat="voucher"]');
 t('פתיחת קבוצה מציגה את המסמכים שלה', (await p.locator('.ldoc').count()) === 2);
 t('עם הסכום', await p.isVisible('.ldoc >> text=₪84,210'));
+
+console.log('\n— דף קטן ברשימה —');
+await p.waitForFunction(() => document.querySelectorAll('.ldoc .th img').length === 2);
+t('לכל מסמך בקבוצה — דף קטן במקום האייקון', (await p.locator('.ldoc .card-ic').count()) === 0);
+t('שתי שורות — בקשה אחת לגשר', count('A:linkThumbs') === 1, String(count('A:linkThumbs')));
+t('שורת הקבוצה שומרת את האייקון', (await p.locator('.lgrp .card-ic').count()) === 5);
+await p.click('.lgrp[data-cat="voucher"]');
+await p.click('.lgrp[data-cat="voucher"]');
+await p.waitForFunction(() => document.querySelectorAll('.ldoc .th img').length === 2);
+await shot('thumbs-group');
+t('פתיחה חוזרת — מהקאש, בלי בקשה', count('A:linkThumbs') === 1);
+const pdfThumb = await p.evaluate(async () => {
+  const b = await fetch('/tests/fixtures/policy.pdf').then(r => r.blob());
+  const t = await window.UI.thumbnail(b, 'application/pdf');
+  return t ? { type: t.type, size: t.size } : null;
+});
+t('PDF — העמוד הראשון, כ-JPEG קטן', pdfThumb && pdfThumb.type === 'image/jpeg' && pdfThumb.size < 30000, JSON.stringify(pdfThumb));
 await shot('entity');
 await p.fill('.lmirror .search-i', 'LG-77310');
 await p.waitForSelector('.lsnip mark');
@@ -304,6 +327,9 @@ t('db.json נושא את הסימון, בלי blobId', rdoc && rdoc.files[0].src
 await p.evaluate(() => { location.hash = '#/entity/e-home'; });
 await p.waitForSelector('.lmirror');
 t('במדף "בכספת" — המסמך החדש', await p.isVisible('.dcard >> text=ערבות בנקאית 4'));
+await p.waitForSelector('.dcard .th img');
+await shot('thumbs-vault');
+t('ומסמך כספת עם קובץ מקבל דף קטן, שנגזר במכשיר', (await p.locator('.dcard .th-l img').count()) === 1);
 t('ובקבוצה במראה — "1 מתוך 1 בכספת"', await p.isVisible('.lgrp[data-cat="guarantee"] >> text=1 מתוך 1 בכספת'));
 await p.evaluate(id => { location.hash = '#/doc/' + id; }, promoted.id);
 await p.waitForSelector('text=הקובץ נשאר באפליקציית התקציב ולא הועלה שוב');
@@ -374,6 +400,9 @@ oldBridge = true;
 await p.click('.mirror-h button');
 await p.waitForSelector('.lmirror .notice-warn');
 t('גשר ישן — ההודעה אומרת לעדכן אותו', /הגשר צריך עדכון/.test(await p.textContent('.lmirror .notice-warn')));
+await p.click('.lgrp[data-cat="c-repairs"]');
+await p.waitForSelector('.ldoc .th-none .th-off');
+t('בלי דרך להביא תמונה — אייקון וסימן ענן, באותו גודל', (await p.locator('.ldoc .th-off').count()) === 1);
 oldBridge = false;
 const why = await p.evaluate(async () => {
   await window.Settings.set(window.CONFIG.K.backupMode, 'oauth');

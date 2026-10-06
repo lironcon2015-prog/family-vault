@@ -1038,6 +1038,61 @@
 
      `opts.root` הוא המשטח הנגלל (`.zoom-stage`) — בלעדיו ה-observer מודד
      מול חלון הדפדפן, וב-sheet שגולל בתוך עצמו זה אומר שהכל "נראה". */
+  /* ---------- תמונה ממוזערת של מסמך — DEC-50 ----------
+     דף קטן ברשימה, ולא עוגן: רוחב קבוע, יחס 3:4, חתוך לראש הדף — שם
+     יושבים הכותרת והלוגו שמזהים מסמך. JPEG של כמה קילובייט, כדי שקאש של
+     עשרות מסמכים לא יורגש. PDF מצויר מהעמוד הראשון בלבד. */
+  UI.THUMB_W = 120;
+  UI.THUMB_H = 160;
+
+  function cropTop(src, sw, sh) {
+    var W = UI.THUMB_W, H = UI.THUMB_H;
+    var scale = Math.max(W / sw, H / sh);
+    var c = U.el('canvas');
+    c.width = W; c.height = H;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+    var dw = sw * scale, dh = sh * scale;
+    ctx.drawImage(src, (W - dw) / 2, 0, dw, dh);
+    return new Promise(function (res) {
+      c.toBlob(function (b) { res(b); }, 'image/jpeg', 0.72);
+    });
+  }
+
+  UI.thumbnail = function (blob, mime) {
+    if (!blob) return Promise.resolve(null);
+    if ((mime || blob.type) === 'application/pdf') {
+      return loadPdfjs().then(function (lib) {
+        return blob.arrayBuffer().then(function (data) {
+          var o = { data: data };
+          Object.keys(PDF_OPTS).forEach(function (k) { o[k] = PDF_OPTS[k]; });
+          return lib.getDocument(o).promise;
+        });
+      }).then(function (pdf) {
+        return pdf.getPage(1).then(function (pg) {
+          var base = pg.getViewport({ scale: 1 });
+          var vp = pg.getViewport({ scale: (UI.THUMB_W * 2) / base.width });
+          var c = U.el('canvas');
+          c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+          var ctx = c.getContext('2d');
+          ctx.direction = 'ltr';
+          return pg.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
+            pdf.destroy();
+            return cropTop(c, c.width, c.height);
+          });
+        });
+      }).catch(function () { return null; });
+    }
+    if (typeof createImageBitmap !== 'function') return Promise.resolve(null);
+    return createImageBitmap(blob).then(function (bm) {
+      return cropTop(bm, bm.width, bm.height).then(function (out) {
+        if (bm.close) bm.close();
+        return out;
+      });
+    }).catch(function () { return null; });
+  };
+
   UI.renderPdf = function (blob, container, opts) {
     opts = opts || {};
     return loadPdfjs().then(function (lib) {

@@ -530,7 +530,13 @@
       class: 'card dcard' + (faded ? ' card-old' : ''), type: 'button',
       dataset: { id: doc.id }
     }, [
-      U.el('span', { class: 'card-ic' }, U.icon(DT.icon(doc.typeKey), 22)),
+      /* מסמך עם קובץ מקבל דף קטן ממנו; מסמך בלי קובץ שומר את האייקון */
+      (doc.files && doc.files.length)
+        ? window.Thumbs.el({
+            large: true, icon: DT.icon(doc.typeKey), mime: doc.files[0].mime,
+            load: function () { return window.Thumbs.forDoc(doc); }
+          })
+        : U.el('span', { class: 'card-ic' }, U.icon(DT.icon(doc.typeKey), 22)),
       U.el('span', { class: 'card-b' }, [
         U.el('span', { class: 'card-t', text: doc.title }),
         U.el('span', { class: 'card-s', text: DT.label(doc.typeKey) })
@@ -622,8 +628,13 @@
     ]);
     var snip = toks ? window.Linked.snippet(d, toks) : null;
     if (snip) b.appendChild(snipNode(snip));
+    /* דף קטן של המסמך במקום האייקון — DEC-50. שורת הקבוצה שומרת את
+       האייקון, וכך רואים מיד מה כותרת ומה מסמך. */
     var row = U.el('button', { class: 'lrow ldoc', type: 'button', dataset: { id: d.id } }, [
-      U.el('span', { class: 'card-ic' }, U.icon(cat.icon, 18)),
+      window.Thumbs.el({
+        icon: cat.icon, mime: d.mime,
+        load: function () { return window.Thumbs.forLinked(src.key, d); }
+      }),
       b,
       promoted ? UI.chip('lin', 'בכספת') : null,
       d.amount ? U.el('span', { class: 'lamt' }, U.bidi(window.Linked.money(d.amount))) : null

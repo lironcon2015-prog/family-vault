@@ -1,7 +1,7 @@
 /* sw.js — מעטפת אופליין.
    CACHE_VERSION חייב להיות זהה ל-version.json ול-_BUNDLE_VERSION ב-index.html.
    `node tools/bump.mjs` כותב את שלושתם, ו-tests/pwa.mjs נכשל אם הם נפרדו. */
-const CACHE_VERSION = '0.19.2';
+const CACHE_VERSION = '0.20.0';
 const CACHE_NAME = 'family-vault-' + CACHE_VERSION;
 
 /* המעטפת, הכתב, וצופה ה-PDF.
@@ -16,7 +16,7 @@ const CORE = [
   './js/versions.js', './js/share.js', './js/keyfile.js', './js/chat.js',
   './js/db.js', './js/settings.js', './js/vault.js', './js/files.js',
   './js/mrz.js', './js/gemini.js', './js/parse.js', './js/expiry.js',
-  './js/drive.js', './js/bridge.js', './js/sync.js', './js/linked.js', './js/search.js', './js/ui.js',
+  './js/drive.js', './js/bridge.js', './js/sync.js', './js/linked.js', './js/search.js', './js/ui.js', './js/thumbs.js',
   './js/forms.js', './js/screens.js', './js/app.js',
   './lib/pdfjs/pdf.min.js', './lib/pdfjs/pdf.worker.min.js',
   ...['FoxitDingbats', 'FoxitFixed', 'FoxitFixedBold', 'FoxitFixedBoldItalic', 'FoxitFixedItalic',
